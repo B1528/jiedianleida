@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
-
 	"github.com/metacubex/mihomo/component/age"
 	"github.com/metacubex/mihomo/component/http"
 	"github.com/metacubex/mihomo/constant"

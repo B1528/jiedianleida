@@ -231,7 +231,7 @@ private const val TPROXY_INBOUND_PORT: Int = 7895
 // value（mihomo 侧小写标识）to label（展示名），同时供卡片取值与选择弹窗列举
 private val MODE_OPTIONS = listOf("rule" to "Rule", "global" to "Global", "direct" to "Direct")
 
-private val TUN_STACK_OPTIONS = listOf("mixed" to "Mixed", "gvisor" to "gVisor", "system" to "System")
+private val TUN_STACK_OPTIONS = listOf("mixed" to "Mixed", "gvisor" to "gVisor", "system" to "System", "mips" to "MIPS")
 
 private fun modeLabel(mode: String): String =
     MODE_OPTIONS.firstOrNull { it.first == mode.lowercase() }?.second ?: mode.ifEmpty { "--" }

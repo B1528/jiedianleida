@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"unsafe"
-
 	"github.com/metacubex/mihomo/component/age"
 	"github.com/metacubex/mihomo/component/updater"
 	"github.com/metacubex/mihomo/config"
