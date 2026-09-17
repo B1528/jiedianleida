@@ -85,7 +85,15 @@ abstract class GoBuildTask : DefaultTask() {
         val goArch = ABI_TO_GOARCH[abi.get()]
             ?: error("Unsupported ABI: ${abi.get()}; expected one of ${ABI_TO_GOARCH.keys}")
 
-        val args = mutableListOf<String>("go", "build")
+        val exeName = if (System.getProperty("os.name").lowercase().contains("windows")) "go.exe" else "go"
+        val pathDirs = System.getenv("PATH")?.split(java.io.File.pathSeparator) ?: emptyList()
+        val standardPaths = listOf("/usr/local/go/bin", "/opt/homebrew/bin", System.getProperty("user.home") + "/go/bin")
+        val goExe = (pathDirs + standardPaths).distinct()
+            .map { java.io.File(it, exeName) }
+            .find { it.exists() && it.canExecute() }
+            ?.absolutePath ?: exeName
+
+        val args = mutableListOf<String>(goExe, "build")
         buildTags.get().takeIf { it.isNotEmpty() }?.let {
             args += "-tags"
             args += it.joinToString(",")
