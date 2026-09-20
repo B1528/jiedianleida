@@ -317,8 +317,8 @@
     <string name="settings_theme_title">Внешний вид и тема</string>
     <string name="settings_theme_group_color">Цвет и тема</string>
     <string name="settings_theme_group_interface">Интерфейс и эффекты</string>
-    <string name="settings_theme_group_navigation">Нижняя навигация</string>
-    <string name="settings_theme_summary">Цвет, размытие и масштаб интерфейса; нижняя панель и жесты назад</string>
+    <string name="settings_theme_group_navigation">Навигация</string>
+    <string name="settings_theme_summary">Цвет, размытие и масштаб интерфейса; настройки навигации и жестов</string>
     <string name="settings_theme_mode">Тема оформления</string>
     <string name="settings_theme_system">Системная</string>
     <string name="settings_theme_light">Светлая</string>
@@ -342,6 +342,10 @@
     <string name="settings_theme_bottom_bar_mode">Отображение нижней панели</string>
     <string name="settings_theme_bottom_bar_icon_and_text">Значок и текст</string>
     <string name="settings_theme_bottom_bar_icon_only">Только значок</string>
+    <string name="settings_theme_pager_gesture">Переключение страниц жестом</string>
+    <string name="settings_theme_pager_gesture_native">По умолчанию</string>
+    <string name="settings_theme_pager_gesture_cross_axis">Межосевой перехват</string>
+    <string name="settings_theme_pager_gesture_ios_like">В стиле iOS</string>
     <string name="settings_theme_palette_style">Цветовая палитра</string>
     <string name="settings_theme_palette_tonal_spot">Тональная (TonalSpot)</string>
     <string name="settings_theme_palette_neutral">Нейтральная (Neutral)</string>

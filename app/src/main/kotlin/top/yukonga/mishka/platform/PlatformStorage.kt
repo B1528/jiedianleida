@@ -99,6 +99,7 @@ object StorageKeys {
     const val THEME_FLOATING_BOTTOM_BAR = "theme_floating_bottom_bar"
     const val THEME_FLOATING_BOTTOM_BAR_STYLE = "theme_floating_bottom_bar_style"
     const val THEME_BOTTOM_BAR_MODE = "theme_bottom_bar_mode"
+    const val THEME_PAGER_GESTURE_MODE = "theme_pager_gesture_mode"
     const val THEME_DENSITY_SCALE = "theme_density_scale"
     const val NAV_RAIL_EXPANDED = "nav_rail_expanded"
     const val DYNAMIC_NOTIFICATION = "dynamic_notification"

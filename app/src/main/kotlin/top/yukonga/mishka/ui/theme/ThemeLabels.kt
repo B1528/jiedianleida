@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import top.yukonga.mishka.R
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
 
 // 主题枚举 → 用户可见名称的唯一映射，避免多处 when 漂移
 
@@ -62,6 +63,15 @@ fun BottomBarMode.label(): String = stringResource(
     when (this) {
         BottomBarMode.IconAndText -> R.string.settings_theme_bottom_bar_icon_and_text
         BottomBarMode.IconOnly -> R.string.settings_theme_bottom_bar_icon_only
+    },
+)
+
+@Composable
+fun PagerInterceptionMode.label(): String = stringResource(
+    when (this) {
+        PagerInterceptionMode.Native -> R.string.settings_theme_pager_gesture_native
+        PagerInterceptionMode.CrossAxisInterceptor -> R.string.settings_theme_pager_gesture_cross_axis
+        PagerInterceptionMode.TapToHalt -> R.string.settings_theme_pager_gesture_ios_like
     },
 )
 

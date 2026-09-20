@@ -317,8 +317,8 @@
     <string name="settings_theme_title">Appearance &amp; Theme</string>
     <string name="settings_theme_group_color">Color &amp; Theme</string>
     <string name="settings_theme_group_interface">Interface &amp; Effects</string>
-    <string name="settings_theme_group_navigation">Bottom Navigation</string>
-    <string name="settings_theme_summary">Color, blur effects and interface scale; bottom bar and back gestures</string>
+    <string name="settings_theme_group_navigation">Navigation</string>
+    <string name="settings_theme_summary">Color, blur effects and interface scale; navigation and gesture options</string>
     <string name="settings_theme_mode">Theme Mode</string>
     <string name="settings_theme_system">Follow System</string>
     <string name="settings_theme_light">Light</string>
@@ -342,6 +342,10 @@
     <string name="settings_theme_bottom_bar_mode">Bottom Bar Options</string>
     <string name="settings_theme_bottom_bar_icon_and_text">Icon and Text</string>
     <string name="settings_theme_bottom_bar_icon_only">Icon Only</string>
+    <string name="settings_theme_pager_gesture">Page Swipe Behavior</string>
+    <string name="settings_theme_pager_gesture_native">Default</string>
+    <string name="settings_theme_pager_gesture_cross_axis">Cross-axis</string>
+    <string name="settings_theme_pager_gesture_ios_like">iOS-like</string>
     <string name="settings_theme_palette_style">Color Style</string>
     <string name="settings_theme_palette_tonal_spot">Tonal Spot (TonalSpot)</string>
     <string name="settings_theme_palette_neutral">Neutral (Neutral)</string>

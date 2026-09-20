@@ -78,6 +78,7 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -139,6 +140,10 @@ fun ThemeSettingsScreen(
     val bottomBarModes = BottomBarMode.entries.toList()
     val bottomBarModeItems = bottomBarModes.map { mode -> mode.label() }
     val selectedBottomBarModeIndex = bottomBarModes.indexOf(themeConfig.bottomBarMode).coerceAtLeast(0)
+    val pagerInterceptionModes = PagerInterceptionMode.entries.toList()
+    val pagerInterceptionModeItems = pagerInterceptionModes.map { mode -> mode.label() }
+    val selectedPagerInterceptionModeIndex =
+        pagerInterceptionModes.indexOf(themeConfig.pagerInterceptionMode).coerceAtLeast(0)
     val topBarBlurStyles = TopBarBlurStyle.entries.toList()
     val topBarBlurStyleItems = topBarBlurStyles.map { style -> style.label() }
     val topBarBlurStyleSummaries = topBarBlurStyles.map { style -> style.summary() }
@@ -273,16 +278,6 @@ fun ThemeSettingsScreen(
                             )
                         }
                     })
-                    if (onSwipeDismissChange != null) {
-                        add(CardItem("swipeDismiss") {
-                            SwitchPreference(
-                                title = stringResource(R.string.settings_swipe_dismiss),
-                                summary = stringResource(R.string.settings_swipe_dismiss_summary),
-                                checked = swipeDismissEnabled,
-                                onCheckedChange = { checked -> onSwipeDismissChange(checked) },
-                            )
-                        })
-                    }
                     if (onPredictiveBackChange != null) {
                         add(CardItem("predictiveBack") {
                             SwitchPreference(
@@ -339,8 +334,35 @@ fun ThemeSettingsScreen(
             item { SmallTitle(text = stringResource(R.string.settings_theme_group_navigation)) }
             groupedCardItems(
                 keyPrefix = "theme_navigation",
-                items = listOf(
-                    CardItem("floating") {
+                items = buildList {
+                    add(CardItem("pagerGesture") {
+                        OverlayDropdownPreference(
+                            title = stringResource(R.string.settings_theme_pager_gesture),
+                            summary = pagerInterceptionModeItems.getOrElse(
+                                selectedPagerInterceptionModeIndex,
+                            ) { pagerInterceptionModeItems.first() },
+                            items = pagerInterceptionModeItems,
+                            selectedIndex = selectedPagerInterceptionModeIndex,
+                            onSelectedIndexChange = { index ->
+                                updateTheme(
+                                    themeConfig.copy(
+                                        pagerInterceptionMode = pagerInterceptionModes[index],
+                                    ),
+                                )
+                            },
+                        )
+                    })
+                    if (onSwipeDismissChange != null) {
+                        add(CardItem("swipeDismiss") {
+                            SwitchPreference(
+                                title = stringResource(R.string.settings_swipe_dismiss),
+                                summary = stringResource(R.string.settings_swipe_dismiss_summary),
+                                checked = swipeDismissEnabled,
+                                onCheckedChange = { checked -> onSwipeDismissChange(checked) },
+                            )
+                        })
+                    }
+                    add(CardItem("floating") {
                         SwitchPreference(
                             title = stringResource(R.string.settings_theme_floating_bottom_bar),
                             summary = stringResource(R.string.settings_theme_floating_bottom_bar_summary),
@@ -370,8 +392,8 @@ fun ThemeSettingsScreen(
                                 },
                             )
                         }
-                    },
-                    CardItem("mode") {
+                    })
+                    add(CardItem("mode") {
                         OverlayDropdownPreference(
                             title = stringResource(R.string.settings_theme_bottom_bar_mode),
                             summary = bottomBarModeItems.getOrElse(
@@ -387,8 +409,8 @@ fun ThemeSettingsScreen(
                                 )
                             },
                         )
-                    },
-                ),
+                    })
+                },
             )
             item {
                 Spacer(

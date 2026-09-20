@@ -315,8 +315,8 @@
     <string name="settings_theme_title">外观与主题</string>
     <string name="settings_theme_group_color">颜色与主题</string>
     <string name="settings_theme_group_interface">界面与效果</string>
-    <string name="settings_theme_group_navigation">底部导航栏</string>
-    <string name="settings_theme_summary">颜色、模糊效果与界面缩放，底栏和返回手势</string>
+    <string name="settings_theme_group_navigation">导航</string>
+    <string name="settings_theme_summary">颜色、模糊效果与界面缩放，导航与手势选项</string>
     <string name="settings_theme_mode">主题模式</string>
     <string name="settings_theme_system">跟随系统</string>
     <string name="settings_theme_light">浅色</string>
@@ -340,6 +340,10 @@
     <string name="settings_theme_bottom_bar_mode">底栏选项</string>
     <string name="settings_theme_bottom_bar_icon_and_text">图标与文字</string>
     <string name="settings_theme_bottom_bar_icon_only">仅图标</string>
+    <string name="settings_theme_pager_gesture">页面切换手势</string>
+    <string name="settings_theme_pager_gesture_native">默认</string>
+    <string name="settings_theme_pager_gesture_cross_axis">跨轴拦截</string>
+    <string name="settings_theme_pager_gesture_ios_like">iOS 风格</string>
     <string name="settings_theme_palette_style">色彩风格</string>
     <string name="settings_theme_palette_tonal_spot">色调点（TonalSpot）</string>
     <string name="settings_theme_palette_neutral">中性（Neutral）</string>

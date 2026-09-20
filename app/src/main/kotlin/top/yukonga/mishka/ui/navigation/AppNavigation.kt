@@ -1,9 +1,8 @@
 package top.yukonga.mishka.ui.navigation
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +22,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
@@ -144,7 +144,11 @@ import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import kotlin.math.abs
+import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.pagerGestureOverride
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
 // Route 是 @Serializable sealed 层级，直接多态编码整个栈；新增路由自动获得持久化能力，无需手工注册
 private val NavBackStackSaver = Saver<SnapshotStateList<NavKey>, List<String>>(
@@ -492,13 +496,33 @@ private fun MainPage(
 ) {
     val homeUiState = homeViewModel?.uiState?.collectAsStateWithLifecycle()?.value ?: HomeUiState()
     val selectedPage = mainPagerState.selectedPage
+    val interceptPagerGestures =
+        themeConfig.pagerInterceptionMode == PagerInterceptionMode.CrossAxisInterceptor
+    val nativePagerNestedScrollConnection = PagerDefaults.pageNestedScrollConnection(
+        state = mainPagerState.pagerState,
+        orientation = Orientation.Horizontal,
+    )
+    val pagerFlingBehavior = PagerDefaults.flingBehavior(
+        state = mainPagerState.pagerState,
+        snapAnimationSpec = PagerNavigationSpringSpec,
+    )
 
     // 页面主体：手机与宽屏两套外壳共用，仅传入不同的容器 modifier 与底部留白
     val pagerContent: @Composable (Modifier, Dp) -> Unit = { pagerModifier, bottomPadding ->
         HorizontalPager(
-            modifier = pagerModifier,
+            modifier = pagerModifier.pagerGestureOverride(
+                pagerState = mainPagerState.pagerState,
+                mode = themeConfig.pagerInterceptionMode,
+            ),
             state = mainPagerState.pagerState,
+            userScrollEnabled = !interceptPagerGestures,
+            pageNestedScrollConnection = if (interceptPagerGestures) {
+                PagerGestureNestedScrollConnection
+            } else {
+                nativePagerNestedScrollConnection
+            },
             verticalAlignment = Alignment.Top,
+            flingBehavior = pagerFlingBehavior,
             overscrollEffect = null,
         ) { page ->
             when (page) {
@@ -813,51 +837,6 @@ class MainPagerState(
         if (!isNavigating && selectedPage != pagerState.currentPage) {
             selectedPage = pagerState.currentPage
         }
-    }
-}
-
-private suspend fun PagerState.springAnimateToPage(target: Int) {
-    if (target !in 0 until pageCount) return
-    var shouldSnapToTarget = false
-    scroll(MutatePriority.UserInput) {
-        val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
-        val distance = target - currentPage - currentPageOffsetFraction
-        val scrollPixels = distance * pageSize
-        if (abs(scrollPixels) <= 0.5f) return@scroll
-
-        var consumedScroll = 0f
-        var skipScroll = false
-        Animatable(0f).animateTo(
-            targetValue = scrollPixels,
-            animationSpec = PagerNavigationSpringSpec,
-        ) {
-            if (skipScroll) return@animateTo
-
-            val delta = value - consumedScroll
-            if (abs(delta) > 0.5f) {
-                val consumed = scrollBy(delta)
-                consumedScroll += consumed
-                if (abs(delta - consumed) > 0.1f) {
-                    shouldSnapToTarget = true
-                    skipScroll = true
-                }
-            } else {
-                consumedScroll = value
-            }
-
-            if (abs(velocity) < 0.1f && abs(scrollPixels - consumedScroll) < 1.0f) {
-                skipScroll = true
-            }
-        }
-
-        val remaining = scrollPixels - consumedScroll
-        if (abs(remaining) > 0.5f) {
-            scrollBy(remaining)
-        }
-    }
-
-    if (shouldSnapToTarget || currentPage != target) {
-        scrollToPage(target)
     }
 }
 

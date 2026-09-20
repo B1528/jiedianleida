@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import top.yukonga.mishka.platform.PlatformStorage
 import top.yukonga.mishka.platform.StorageKeys
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
 
 data class ThemeConfig(
     val colorMode: Int = 0,
@@ -16,6 +17,7 @@ data class ThemeConfig(
     val floatingBottomBar: Boolean = false,
     val floatingBottomBarStyle: FloatingBottomBarStyle = FloatingBottomBarStyle.Miuix,
     val bottomBarMode: BottomBarMode = BottomBarMode.IconAndText,
+    val pagerInterceptionMode: PagerInterceptionMode = PagerInterceptionMode.CrossAxisInterceptor,
     val densityScale: Float = DefaultDensityScale,
 )
 
@@ -115,6 +117,12 @@ fun readThemeConfig(storage: PlatformStorage): ThemeConfig {
         bottomBarMode = BottomBarMode.fromStorage(
             storage.getString(StorageKeys.THEME_BOTTOM_BAR_MODE, BottomBarMode.IconAndText.storageValue),
         ),
+        pagerInterceptionMode = pagerInterceptionModeFromStorage(
+            storage.getString(
+                StorageKeys.THEME_PAGER_GESTURE_MODE,
+                PagerInterceptionMode.CrossAxisInterceptor.name,
+            ),
+        ),
         densityScale = normalizeDensityScale(
             storage.getString(StorageKeys.THEME_DENSITY_SCALE, DefaultDensityScale.toString()).toFloatOrNull()
                 ?: DefaultDensityScale,
@@ -140,5 +148,9 @@ fun writeThemeConfig(storage: PlatformStorage, config: ThemeConfig) {
     storage.putString(StorageKeys.THEME_FLOATING_BOTTOM_BAR, config.floatingBottomBar.toString())
     storage.putString(StorageKeys.THEME_FLOATING_BOTTOM_BAR_STYLE, config.floatingBottomBarStyle.storageValue)
     storage.putString(StorageKeys.THEME_BOTTOM_BAR_MODE, config.bottomBarMode.storageValue)
+    storage.putString(StorageKeys.THEME_PAGER_GESTURE_MODE, config.pagerInterceptionMode.name)
     storage.putString(StorageKeys.THEME_DENSITY_SCALE, normalizeDensityScale(config.densityScale).toString())
 }
+
+private fun pagerInterceptionModeFromStorage(value: String): PagerInterceptionMode =
+    PagerInterceptionMode.entries.firstOrNull { it.name == value } ?: PagerInterceptionMode.CrossAxisInterceptor
