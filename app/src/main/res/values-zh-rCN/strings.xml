@@ -99,8 +99,9 @@
     <string name="radar_action_scanning">扫描中…</string>
     <string name="radar_action_reset">重置</string>
     <string name="radar_action_export">导出 %1$s</string>
-    <string name="radar_test_unavailable">代理未运行，没有做连通性测试</string>
+    <string name="radar_test_unavailable">测速内核没能加载节点，跳过连通性测试</string>
     <string name="radar_sources_failed">有 %1$d 个源抓取失败</string>
+    <string name="radar_parse_failed">有 %1$d 条链接无法解析</string>
     <string name="radar_action_continue">继续执行</string>
     <string name="radar_target_all">全部通过</string>
     <string name="radar_export_dir_none">选择导出目录</string>

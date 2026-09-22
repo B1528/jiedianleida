@@ -46,29 +46,9 @@ object RuntimeOverrideBuilder {
     internal const val RADAR_PROVIDER_NAME = "radar"
     internal const val RADAR_PROVIDER_FILE = "radar-provider.yaml"
 
-    private const val RADAR_HEALTHCHECK_URL = "http://www.gstatic.com/generate_204"
-    private const val RADAR_HEALTHCHECK_INTERVAL = 300
-
-    /** provider 文件的唯一来源：装配 override 和雷达写文件必须指向同一个路径 */
+    /** provider 文件的唯一来源：雷达写文件和它自己的 override 必须指向同一个路径 */
     internal fun radarProviderFile(context: Context): File =
         File(ConfigGenerator.getWorkDir(context), RADAR_PROVIDER_FILE)
-
-    /**
-     * 声明雷达 provider。启动期就写进 override，之后雷达只覆写文件内容。
-     * 文件不存在时 mihomo 视为空 provider，不影响启动。
-     */
-    private fun buildRadarProvider(context: Context): Map<String, ProxyProviderOverride> =
-        mapOf(
-            RADAR_PROVIDER_NAME to ProxyProviderOverride(
-                type = "file",
-                path = radarProviderFile(context).absolutePath,
-                healthCheck = ProviderHealthCheckOverride(
-                    enable = true,
-                    url = RADAR_HEALTHCHECK_URL,
-                    interval = RADAR_HEALTHCHECK_INTERVAL,
-                ),
-            ),
-        )
 
     private val json = Json {
         encodeDefaults = false
@@ -138,8 +118,10 @@ object RuntimeOverrideBuilder {
             dns = buildDnsOverride(tunMode, userOverride.dns),
             tun = buildTunOverride(context, tunMode, tunFd, userOverride.tun),
             profile = ProfileOverride(storeSelected = false, storeFakeIp = true),
-            // 用户自带 proxy-providers 时并存，雷达那个同名会覆盖（名字固定，冲突概率可忽略）
-            proxyProviders = (userOverride.proxyProviders ?: emptyMap()) + buildRadarProvider(context),
+            // 雷达 provider 只声明在雷达自己的 override 里。日常配置里声明它，会让雷达扫出来的
+            // 上千个候选节点出现在用户的实时代理列表里；provider 文件又是持久化的，跑完还留着，
+            // health-check 也会一直对它们跑。
+            proxyProviders = userOverride.proxyProviders,
         )
         // 原子写：mihomo 紧接着就以 --override-json 读它，半个 JSON 会让启动失败且难以定位
         val file = File(ConfigGenerator.getWorkDir(context), FILE_NAME)

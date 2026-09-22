@@ -99,8 +99,9 @@
     <string name="radar_action_scanning">Сканирование…</string>
     <string name="radar_action_reset">Сбросить</string>
     <string name="radar_action_export">Экспорт %1$s</string>
-    <string name="radar_test_unavailable">Прокси не запущен, узлы не проверены</string>
+    <string name="radar_test_unavailable">Ядро тестирования не загрузило узлы, проверка пропущена</string>
     <string name="radar_sources_failed">Не удалось загрузить источников: %1$d</string>
+    <string name="radar_parse_failed">Не удалось разобрать ссылок: %1$d</string>
     <string name="radar_action_continue">Продолжить</string>
     <string name="radar_target_all">Прошли все</string>
     <string name="radar_export_dir_none">Выбрать папку экспорта</string>

@@ -16,6 +16,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
@@ -107,13 +108,23 @@ class MihomoApiClient(
         name: String,
         testUrl: String = "http://www.gstatic.com/generate_204",
         timeout: Int = 5000,
-    ): DelayResult =
-        client.get("$baseUrl/providers/proxies/$provider/$name/healthcheck") {
+    ): DelayResult {
+        // 节点名可以带空格、中文、emoji——原样拼进 URL 会被 Ktor 在解析阶段直接拒掉，
+        // 或落到错误的路由上。两段都必须按单个路径段编码。
+        val path = "$baseUrl/providers/proxies/${provider.encodeURLPathPart()}" +
+            "/${name.encodeURLPathPart()}/healthcheck"
+        val response: HttpResponse = client.get(path) {
             url {
                 parameters.append("url", testUrl)
                 parameters.append("timeout", timeout.toString())
             }
-        }.body()
+        }
+        // 节点不在 provider 里时 mihomo 回 404 + {"message":...}；不校验 status 的话这个 body
+        // 会被解成 DelayResult(delay = 0)（delay 默认 0 + ignoreUnknownKeys），与「节点真的
+        // 不通」完全无法区分。必须显式抛出，让调用方记失败而不是记 0ms。
+        ensureSuccess(response, "provider '$provider' node '$name'")
+        return response.body()
+    }
 
     suspend fun getRules(): RulesResponse =
         client.get("$baseUrl/rules").body()

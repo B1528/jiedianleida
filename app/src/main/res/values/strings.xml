@@ -101,8 +101,10 @@
     <string name="radar_action_scanning">Scanning…</string>
     <string name="radar_action_reset">Reset</string>
     <string name="radar_action_export">Export %1$s</string>
-    <string name="radar_test_unavailable">Proxy is not running, so the nodes were not tested</string>
+    <string name="radar_test_unavailable">The test kernel could not load any nodes, so connectivity was not tested</string>
+
     <string name="radar_sources_failed">%1$d sources failed to load</string>
+    <string name="radar_parse_failed">%1$d links could not be parsed</string>
     <string name="radar_action_continue">Continue</string>
     <string name="radar_target_all">Passing all</string>
     <string name="radar_export_dir_none">Choose export folder</string>
