@@ -55,7 +55,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
-import top.yukonga.miuix.kmp.icon.extended.Check
+import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -223,7 +223,7 @@ private fun StateIcon(ok: Boolean) {
     ) {
         if (ok) {
             Icon(
-                imageVector = MiuixIcons.Check,
+                imageVector = MiuixIcons.Ok,
                 contentDescription = null,
                 tint = color,
                 modifier = Modifier.size(26.dp),
@@ -306,7 +306,7 @@ private fun StageMark(done: Boolean, active: Boolean) {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = MiuixIcons.Check,
+                    imageVector = MiuixIcons.Ok,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(11.dp),
