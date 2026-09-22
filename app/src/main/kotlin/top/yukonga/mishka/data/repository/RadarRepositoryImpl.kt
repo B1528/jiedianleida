@@ -216,18 +216,36 @@ class RadarRepositoryImpl(
     ): List<RadarTestResult> {
         val api = MihomoApiClient(baseUrl = "http://$endpoint", secret = secret)
         return try {
-            // 名字必须与写进文件时一致，否则 healthcheck 按名字找不到节点，全部 404
-            val names = SubscriptionRenderer.uniqueNames(nodes)
-
-            providerFile.parentFile?.mkdirs()
-            providerFile.writeText(SubscriptionRenderer.clashProvider(nodes), Charsets.UTF_8)
-            diag("nodes=${nodes.size}")
-            try {
-                api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
-                diag("updateProvider ok")
-            } catch (e: Throwable) {
-                diag("updateProvider failed: ${e.message}")
-                throw e
+            // mihomo 校验 provider 是**整份原子**的：任何一个节点不合法，PUT 直接 503，
+            // 整份一条都不加载。而它一次只报第一条，所以按报出的下标逐条剔除后重试，
+            // 别让上千条里的一条坏节点把整轮测速废掉。
+            var alive = nodes.indices.toList()
+            var names: Map<Int, String> = emptyMap()
+            var dropped = 0
+            while (true) {
+                val list = alive.map { nodes[it] }
+                // 名字必须与写进文件时一致，否则 healthcheck 按名字找不到节点，全部 404
+                val unique = SubscriptionRenderer.uniqueNames(list)
+                names = alive.withIndex().associate { (j, orig) -> orig to unique[j] }
+                providerFile.parentFile?.mkdirs()
+                providerFile.writeText(SubscriptionRenderer.clashProvider(list), Charsets.UTF_8)
+                diag("nodes=${list.size} dropped=$dropped")
+                try {
+                    api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
+                    diag("updateProvider ok")
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    val bad = badNodeIndex(e.message)
+                    if (bad == null || bad !in list.indices || dropped >= MAX_DROPPED_NODES) {
+                        diag("updateProvider failed: ${e.message}")
+                        throw e
+                    }
+                    diag("drop ${list[bad].name}: ${e.message}")
+                    alive = alive.filterIndexed { j, _ -> j != bad }
+                    dropped++
+                }
             }
 
             // 写文件成功、PUT 回 204 都不代表内核真接受了这份 provider：YAML 里哪怕只有一个
@@ -245,7 +263,7 @@ class RadarRepositoryImpl(
                             val delay = try {
                                 api.getProviderProxyDelay(
                                     provider = RuntimeOverrideBuilder.RADAR_PROVIDER_NAME,
-                                    name = names[i],
+                                    name = names[i] ?: n.name,
                                     testUrl = serviceUrl,
                                     timeout = TEST_TIMEOUT_MS,
                                 ).delay
@@ -346,6 +364,13 @@ class RadarRepositoryImpl(
             File(ConfigGenerator.getWorkDir(context), "radar-diag.txt").readText()
         }.getOrDefault("")
     }
+
+    /** 从 mihomo 的 `proxy N error: ...` 里抠出坏节点的下标；抠不到返回 null */
+    private fun badNodeIndex(message: String?): Int? =
+        message?.let { Regex("""proxy (\d+) error""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+
+    /** 自愈剔除的上限：整份都坏时不能把循环拖成死循环 */
+    private val MAX_DROPPED_NODES = 20
 
     private fun jsonEscape(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"")

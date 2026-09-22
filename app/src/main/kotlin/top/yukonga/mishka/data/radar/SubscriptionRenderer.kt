@@ -283,7 +283,16 @@ internal object SubscriptionRenderer {
         if (n.network.isNotEmpty() && n.network != "tcp") p["network"] = n.network
 
         n.tls?.let { t ->
-            if (t.sni.isNotEmpty()) p["servername"] = t.sni
+            // mihomo 的 vless/vmess 不会因为有 servername 就自动开 TLS，必须显式 tls: true。
+            // 缺了它，带 reality-opts 的节点会被整份 provider 拒收（503 REALITY requires TLS），
+            // 其余 935 条也跟着一条都加载不进来。
+            if (n.protocol == "vless" || n.protocol == "vmess") p["tls"] = true
+            // mihomo 各协议的 SNI 字段名不统一：只有 vless/vmess 收 servername，
+            // trojan / hysteria2 / tuic 收的是 sni。写错那一边不报错，只是静默不带 SNI，
+            // 现象是「节点能连上但 TLS 握手被拒」——比整份拒收更难查。
+            if (t.sni.isNotEmpty()) {
+                p[if (n.protocol == "vless" || n.protocol == "vmess") "servername" else "sni"] = t.sni
+            }
             if (t.insecure) p["skip-cert-verify"] = true
             if (t.alpn.isNotEmpty()) {
                 p["alpn"] = t.alpn.split(',', ' ').filter { it.isNotEmpty() }
@@ -366,10 +375,21 @@ internal object SubscriptionRenderer {
         }
 
         n.tls?.let { t ->
-            if (t.sni.isNotEmpty() || t.insecure) {
+            if (t.sni.isNotEmpty() || t.insecure || t.reality) {
                 sb.append(",\"tls\":{\"enabled\":true")
                 if (t.sni.isNotEmpty()) sb.append(",\"server_name\":\"").append(esc(t.sni)).append("\"")
                 if (t.insecure) sb.append(",\"insecure\":true")
+                // sing-box 的 REALITY 嵌在 tls 里，且 uTLS 指纹是必需的（缺了握不上手）
+                if (t.reality && t.pbk.isNotEmpty()) {
+                    sb.append(",\"reality\":{\"enabled\":true")
+                    sb.append(",\"public_key\":\"").append(esc(t.pbk)).append("\"")
+                    if (t.sid.isNotEmpty()) sb.append(",\"short_id\":\"").append(esc(t.sid)).append("\"")
+                    sb.append("}")
+                    val fp = esc(t.fp.ifEmpty { "chrome" })
+                    sb.append(",\"utls\":{\"enabled\":true,\"fingerprint\":\"").append(fp).append("\"}")
+                } else if (t.fp.isNotEmpty()) {
+                    sb.append(",\"utls\":{\"enabled\":true,\"fingerprint\":\"").append(esc(t.fp)).append("\"}")
+                }
                 sb.append("}")
             }
         }
