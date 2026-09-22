@@ -30,20 +30,23 @@ internal object RadarExtractor {
 
     /* ---------- 容器嗅探 ---------- */
 
+    private val CLASH_KEY = Regex("""^\s*(proxies|proxy-providers)\s*:""", RegexOption.MULTILINE)
+    private val SINGBOX_KEY = Regex("""^\s*outbounds\s*:""", RegexOption.MULTILINE)
+    private val HTML_TAG = Regex("""<html|<!doctype|<body|<pre|<textarea""", RegexOption.IGNORE_CASE)
+
     fun detect(body: String): String {
         val raw = body.trim()
         if (raw.isEmpty()) return "EMPTY"
 
+        // 只有「必须在开头附近」的判据才用截断窗口
         val head = raw.take(4000)
 
         if (head.startsWith("{") || head.startsWith("[")) return "JSON"
-        if (Regex("""^\s*(proxies|proxy-providers)\s*:""", RegexOption.MULTILINE).containsMatchIn(head)) {
-            return "CLASH_YAML"
-        }
-        if (Regex("""^\s*outbounds\s*:""", RegexOption.MULTILINE).containsMatchIn(head)) return "SINGBOX_YAML"
-        if (Regex("""<html|<!doctype|<body|<pre|<textarea""", RegexOption.IGNORE_CASE).containsMatchIn(head)) {
-            return "HTML"
-        }
+        // 行首锚定的键要扫全文：proxies: / outbounds: 完全可能落在几千字符的注释头或
+        // proxy-groups 之后，只看前 4000 字符会把整份配置降级成「只剩正则兜底」
+        if (CLASH_KEY.containsMatchIn(raw)) return "CLASH_YAML"
+        if (SINGBOX_KEY.containsMatchIn(raw)) return "SINGBOX_YAML"
+        if (HTML_TAG.containsMatchIn(head)) return "HTML"
         if (RadarText.looksBase64(body)) return "BASE64"
         if (RadarText.hasLink(body)) return "PLAIN"
         return "UNKNOWN"
@@ -79,7 +82,10 @@ internal object RadarExtractor {
                 nodes = parseJsonContainer(text)
                 note = "JSON 容器"
             }
-            "SINGBOX_YAML" -> note = "sing-box YAML 暂未支持"
+            "SINGBOX_YAML" -> {
+                nodes = parseSingboxOutbounds(text)
+                note = "sing-box YAML"
+            }
         }
 
         // 3) 正则兜底（保召回），无条件执行
@@ -130,17 +136,32 @@ internal object RadarExtractor {
      * 而且必须容忍零缩进序列项（`proxies:` 下一行直接 `- name:`），
      * 标准库解析器对残缺 YAML 会整体抛异常，得不偿失。
      */
-    fun parseClashProxies(text: String): List<Map<String, Any?>> {
+    fun parseClashProxies(text: String): List<Map<String, Any?>> =
+        parseSection(text, Regex("""^\s*proxies\s*:""")).orEmpty()
+
+    /**
+     * sing-box 的 `outbounds:` 段落。字段名与 Clash 不同，先映射成 Clash 侧名字，
+     * 再交给 [ShareLinkCodec.fromClash] 走同一条通路 —— 否则这类订阅一个节点都出不来。
+     */
+    fun parseSingboxOutbounds(text: String): List<Map<String, Any?>> =
+        parseSection(text, Regex("""^\s*outbounds\s*:"""))?.mapNotNull(::singboxToClash).orEmpty()
+
+    /**
+     * 取出 `<key>:` 下面那一段序列，每条 `- ` 起一个条目。Clash 的 proxies 与 sing-box 的
+     * outbounds 缩进结构一致，共用同一套扫描。
+     * 返回 null 表示整份文本里没有这个键（区别于「有这个键但一条都没解析出来」）。
+     */
+    private fun parseSection(text: String, key: Regex): List<Map<String, Any?>>? {
         val lines = text.split('\n').map { it.trimEnd('\r') }
         var start = -1
 
         for (i in lines.indices) {
-            if (Regex("""^\s*proxies\s*:""").containsMatchIn(stripComment(lines[i]))) {
+            if (key.containsMatchIn(stripComment(lines[i]))) {
                 start = i
                 break
             }
         }
-        if (start < 0) return emptyList()
+        if (start < 0) return null
 
         val block = ArrayList<String>()
         for (j in start + 1 until lines.size) {
@@ -180,6 +201,79 @@ internal object RadarExtractor {
         }
 
         return entries.mapNotNull { parseEntry(it) }
+    }
+
+    /**
+     * sing-box 的 outbound → Clash 字段名。只映射两边语义一致的部分，
+     * 映射不出来的直接丢，交给 L0 去淘汰。
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun singboxToClash(o: Map<String, Any?>): Map<String, Any?>? {
+        val raw = (o["type"] as? String)?.lowercase() ?: return null
+        val type = if (raw == "shadowsocks") "ss" else raw
+
+        val out = LinkedHashMap<String, Any?>()
+        out["type"] = type
+        out["name"] = (o["tag"] as? String).orEmpty()
+        out["server"] = (o["server"] as? String).orEmpty()
+        out["port"] = (o["server_port"] as? Number)?.toInt()
+            ?: (o["server_port"] as? String)?.toIntOrNull()
+            ?: 0
+
+        (o["uuid"] as? String)?.let { out["uuid"] = it }
+        (o["password"] as? String)?.let { out["password"] = it }
+        (o["flow"] as? String)?.let { out["flow"] = it }
+        (o["alter_id"] as? Number)?.let { out["alterId"] = it.toInt() }
+        when (type) {
+            "ss" -> (o["method"] as? String)?.let { out["cipher"] = it }
+            "vmess" -> (o["security"] as? String)?.let { out["cipher"] = it }
+        }
+
+        (o["tls"] as? Map<String, Any?>)?.let { tls ->
+            if (tls["enabled"] == true) out["tls"] = true
+            (tls["server_name"] as? String)?.takeIf { it.isNotEmpty() }?.let { out["servername"] = it }
+            if (tls["insecure"] == true) out["skip-cert-verify"] = true
+            (tls["alpn"] as? List<*>)?.let { list -> out["alpn"] = list.map { it.toString() } }
+            val fp = (tls["utls"] as? Map<String, Any?>)?.get("fingerprint") as? String
+            if (!fp.isNullOrEmpty()) out["client-fingerprint"] = fp
+            (tls["reality"] as? Map<String, Any?>)?.let { ro ->
+                if (ro["enabled"] == true) {
+                    val opts = LinkedHashMap<String, Any?>()
+                    (ro["public_key"] as? String)?.takeIf { it.isNotEmpty() }?.let { opts["public-key"] = it }
+                    (ro["short_id"] as? String)?.takeIf { it.isNotEmpty() }?.let { opts["short-id"] = it }
+                    if (opts.isNotEmpty()) out["reality-opts"] = opts
+                }
+            }
+        }
+
+        (o["transport"] as? Map<String, Any?>)?.let { tr ->
+            when ((tr["type"] as? String)?.lowercase()) {
+                "ws", "httpupgrade" -> {
+                    out["network"] = "ws"
+                    val ws = LinkedHashMap<String, Any?>()
+                    (tr["path"] as? String)?.takeIf { it.isNotEmpty() }?.let { ws["path"] = it }
+                    val headers = tr["headers"] as? Map<String, Any?>
+                    val host = headers?.get("Host") ?: headers?.get("host")
+                    if (host != null) {
+                        ws["headers"] = linkedMapOf<String, Any?>("Host" to host.toString())
+                    }
+                    if (ws.isNotEmpty()) out["ws-opts"] = ws
+                }
+
+                "grpc" -> {
+                    out["network"] = "grpc"
+                    (tr["service_name"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+                        out["grpc-opts"] = linkedMapOf<String, Any?>("grpc-service-name" to it)
+                    }
+                }
+
+                "tcp", null -> Unit
+
+                else -> out["network"] = tr["type"].toString()
+            }
+        }
+
+        return out
     }
 
     /** 去注释，但不动引号里的 # */

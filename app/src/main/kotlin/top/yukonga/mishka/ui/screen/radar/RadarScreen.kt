@@ -326,6 +326,14 @@ private fun RadarHeaderCard(uiState: RadarUiState) {
                         modifier = Modifier.padding(top = 7.dp),
                     )
                 }
+                if (uiState.parseFailed > 0) {
+                    Text(
+                        text = stringResource(R.string.radar_parse_failed, uiState.parseFailed),
+                        fontSize = 12.5.sp,
+                        color = StatusColors.warning,
+                        modifier = Modifier.padding(top = 7.dp),
+                    )
+                }
             }
         }
     }

@@ -45,7 +45,9 @@ internal object RadarDedupe {
     private val NET_192 = Regex("^192\\.168\\.")
     private val NET_172 = Regex("^172\\.(1[6-9]|2\\d|3[01])\\.")
     private val NET_169 = Regex("^169\\.254\\.")
-    private val NET_V6 = Regex("^(::1|fe80:|fc|fd)", RegexOption.IGNORE_CASE)
+    // ULA 是 fc00::/7，必须带上首组的 4 位十六进制和冒号；裸 fc/fd 前缀会把
+    // fcdn.example.com 这类正常域名一起判成内网
+    private val NET_V6 = Regex("^(::1|fe80:|f[cd][0-9a-f]{2}:)", RegexOption.IGNORE_CASE)
 
     private fun isBadHost(h: String): Boolean =
         BAD_HOST.containsMatchIn(h) ||

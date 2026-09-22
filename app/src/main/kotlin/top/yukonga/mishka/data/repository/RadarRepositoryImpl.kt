@@ -31,8 +31,6 @@ import top.yukonga.mishka.domain.model.RadarSourceFailure
 import top.yukonga.mishka.domain.model.RadarSourceInput
 import top.yukonga.mishka.domain.model.RadarTestResult
 import top.yukonga.mishka.domain.repository.RadarRepository
-import top.yukonga.mishka.platform.ProxyServiceBridge
-import top.yukonga.mishka.platform.ProxyState
 import top.yukonga.mishka.service.ConfigGenerator
 import top.yukonga.mishka.service.MihomoRunner
 import top.yukonga.mishka.service.RuntimeOverrideBuilder
@@ -107,6 +105,7 @@ class RadarRepositoryImpl(
 
     override fun parse(fetched: RadarFetchResult): RadarScanResult {
         val all = ArrayList<RadarNode>()
+        var parseFailed = 0
         for (body in fetched.bodies) {
             val ext = RadarExtractor.extract(body.body)
             val nodes = ArrayList<RadarNode>()
@@ -115,7 +114,10 @@ class RadarRepositoryImpl(
             for (obj in ext.nodes) {
                 ShareLinkCodec.fromClash(obj)?.let(nodes::add)
             }
-            nodes.addAll(ShareLinkCodec.parseAll(ext.links).nodes)
+            // failed 不能丢：解析不出来的链只有这里能统计到，丢了用户就完全看不见
+            val parsed = ShareLinkCodec.parseAll(ext.links)
+            parseFailed += parsed.failed.size
+            nodes.addAll(parsed.nodes)
 
             // origin 是 sourceCount 的唯一来源，漏了这一步跨源重复就永远是 0
             all.addAll(nodes.map { it.copy(origin = body.sourceId) })
@@ -136,6 +138,7 @@ class RadarRepositoryImpl(
             nodes = deduped.unique,
             failures = fetched.failures,
             roundTripFailed = roundTrip.failed.size,
+            parseFailed = parseFailed,
         )
     }
 
@@ -181,14 +184,11 @@ class RadarRepositoryImpl(
         withContext(Dispatchers.IO) {
             if (nodes.isEmpty()) return@withContext emptyList()
 
-            val running = ProxyServiceBridge.state.value
-            if (running.state == ProxyState.Running) {
-                // 日常代理在跑：借它的内核，不另起进程
-                return@withContext testOnKernel(nodes, serviceUrl, running.externalController, running.secret)
-            }
-
-            // 日常代理没跑：自己拉一个纯内核。**不能直接返回空表** —— 那等于要求用户先开代理
-            // 才能测，而代理能不能起来恰恰取决于这批节点通不通，是个死锁。
+            // 一律起独立内核，哪怕日常代理正在跑。借它的内核会把上千个候选节点写进
+            // 用户实时代理列表（provider 文件是持久化的，跑完还留着），而日常配置现在
+            // 也不再声明 radar provider，PUT 只会 404。
+            // **不能直接返回空表** —— 那等于要求用户先开代理才能测，而代理能不能起来
+            // 恰恰取决于这批节点通不通，是个死锁。
             val kernel = startKernel() ?: return@withContext emptyList()
             try {
                 testOnKernel(nodes, serviceUrl, kernel.endpoint, kernel.secret)
@@ -217,6 +217,13 @@ class RadarRepositoryImpl(
             providerFile.parentFile?.mkdirs()
             providerFile.writeText(SubscriptionRenderer.clashProvider(nodes), Charsets.UTF_8)
             api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
+
+            // 写文件成功、PUT 回 204 都不代表内核真接受了这份 provider：YAML 里哪怕只有一个
+            // 非法字符，mihomo 也会整份丢弃并静默加载 0 个代理，随后所有 healthcheck 404，
+            // 最终表现成「全部节点不可用」。这里回读一次，0 个节点直接作废整轮测试。
+            val loaded = api.getProviders()
+                .providers[RuntimeOverrideBuilder.RADAR_PROVIDER_NAME]?.proxies?.size ?: 0
+            if (loaded == 0) return emptyList()
 
             val gate = Semaphore(TEST_CONCURRENCY)
             coroutineScope {
@@ -262,11 +269,11 @@ class RadarRepositoryImpl(
         workDir.mkdirs()
 
         // provider 文件必须先存在：mihomo 在 Parse 阶段就读它，缺失会让整个配置解析失败，
-        // 现象是「内核起不来」，而不是「provider 是空的」
+        // 现象是「内核起不来」，而不是「provider 是空的」。
+        // 而且必须无条件重置：上一轮跑剩的文件会在这里被读走，里面只要有一个非法字符，
+        // 内核就会把整份 provider 判废、静默加载 0 个代理——后续的 PUT 也救不回来。
         providerFile.parentFile?.mkdirs()
-        if (!providerFile.isFile) {
-            providerFile.writeText(EMPTY_PROVIDER, Charsets.UTF_8)
-        }
+        providerFile.writeText(EMPTY_PROVIDER, Charsets.UTF_8)
 
         File(workDir, KERNEL_CONFIG_NAME).writeText(KERNEL_CONFIG_BODY, Charsets.UTF_8)
 

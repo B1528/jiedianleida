@@ -83,6 +83,8 @@ data class RadarUiState(
     val failedSources: Int = 0,
     /** 暂停态提示用：这一轮实际下回来了几个源 */
     val pausedSources: Int = 0,
+    /** 分享链解析失败条数。非 0 说明有链被静默丢掉，用户应当能看见 */
+    val parseFailed: Int = 0,
     /**
      * 当前导出目录的显示名；null 表示还没选过。真正的 tree uri 留在 ViewModel 里不进状态 ——
      * 屏幕只需要「显示什么」，不需要拿它去拼路径。
@@ -293,6 +295,7 @@ class RadarViewModel(
                     selectedTarget = null,
                     failedSources = 0,
                     pausedSources = 0,
+                    parseFailed = 0,
                     testUnavailable = false,
                 )
             }
@@ -356,6 +359,7 @@ class RadarViewModel(
                     fetched = result.fetched,
                     deduped = result.deduped,
                     failedSources = result.failures.size,
+                    parseFailed = result.parseFailed,
                 )
             }
 
@@ -433,6 +437,7 @@ class RadarViewModel(
                 selectedTarget = null,
                 failedSources = 0,
                 pausedSources = 0,
+                parseFailed = 0,
                 testUnavailable = false,
             )
         }

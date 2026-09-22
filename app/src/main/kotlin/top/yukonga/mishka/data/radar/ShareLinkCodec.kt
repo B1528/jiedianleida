@@ -66,7 +66,7 @@ internal object ShareLinkCodec {
     /* ---------- vmess ---------- */
 
     private fun parseVmess(link: String): RadarNode? {
-        val body = link.removePrefix("vmess://").substringBefore('#')
+        val body = link.substringAfter("://").substringBefore('#')
         val json = RadarText.decodeBase64(body) ?: return null
         val o = runCatching { JSON.parseToJsonElement(json) as JsonObject }.getOrNull() ?: return null
 
@@ -88,6 +88,8 @@ internal object ShareLinkCodec {
                     sni = sni,
                     alpn = o.str("alpn"),
                     fp = o.str("fp"),
+                    pbk = o.str("pbk"),
+                    sid = o.str("sid"),
                     reality = tlsMode == "reality",
                 )
             } else null,
@@ -146,7 +148,7 @@ internal object ShareLinkCodec {
     /* ---------- ss ---------- */
 
     private fun parseSs(link: String): RadarNode? {
-        var rest = link.removePrefix("ss://")
+        var rest = link.substringAfter("://")
 
         var name = ""
         val hash = rest.indexOf('#')
@@ -203,7 +205,7 @@ internal object ShareLinkCodec {
     /* ---------- ssr ---------- */
 
     private fun parseSsr(link: String): RadarNode? {
-        val decoded = RadarText.decodeBase64(link.removePrefix("ssr://")) ?: return null
+        val decoded = RadarText.decodeBase64(link.substringAfter("://")) ?: return null
         val head = decoded.substringBefore("/?").split(':')
         if (head.size < 6) return null
 
@@ -251,7 +253,10 @@ internal object ShareLinkCodec {
                 if (n.tls != null) {
                     sb.append(",\"tls\":\"").append(if (n.tls.reality) "reality" else "tls").append("\"")
                     sb.append(",\"sni\":\"").append(escapeJson(n.tls.sni)).append("\"")
+                    if (n.tls.alpn.isNotEmpty()) sb.append(",\"alpn\":\"").append(escapeJson(n.tls.alpn)).append("\"")
                     if (n.tls.fp.isNotEmpty()) sb.append(",\"fp\":\"").append(escapeJson(n.tls.fp)).append("\"")
+                    if (n.tls.pbk.isNotEmpty()) sb.append(",\"pbk\":\"").append(escapeJson(n.tls.pbk)).append("\"")
+                    if (n.tls.sid.isNotEmpty()) sb.append(",\"sid\":\"").append(escapeJson(n.tls.sid)).append("\"")
                 }
                 if (n.ws != null) {
                     sb.append(",\"path\":\"").append(escapeJson(n.ws.path)).append("\"")
@@ -270,7 +275,8 @@ internal object ShareLinkCodec {
             "tuic" -> "tuic://${RadarText.encodeComponent(n.uuid)}:" +
                 "${RadarText.encodeComponent(n.password)}@$hp${buildQuery(n)}$frag"
 
-            "ss" -> "ss://" + RadarText.encodeBase64("${n.method}:${n.password}") + "@$hp$frag"
+            "ss" -> "ss://" + RadarText.encodeBase64("${n.method}:${n.password}") + "@$hp" +
+                (if (n.plugin.isNotEmpty()) "?${n.plugin}" else "") + frag
 
             else -> n.raw
         }

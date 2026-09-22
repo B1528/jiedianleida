@@ -84,4 +84,6 @@ data class RadarScanResult(
     val failures: List<RadarSourceFailure> = emptyList(),
     /** 往返自检失败条数。非 0 说明解析器读错了字段，而不是节点本身有问题 */
     val roundTripFailed: Int = 0,
+    /** 分享链解析失败条数。非 0 说明有链被静默丢掉，用户应当能看见 */
+    val parseFailed: Int = 0,
 )
