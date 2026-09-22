@@ -110,7 +110,8 @@ internal object RadarText {
         repeat(2) {
             if (!looksBase64(cur)) return null
             val dec = decodeBase64(cur) ?: return null
-            if (hasLink(dec)) return dec
+            // 只认分享链会把 base64 包着的 Clash YAML / JSON 整份丢掉——解开了却没链接，白丢
+            if (hasLink(dec) || dec.contains("proxies:") || dec.startsWith("{")) return dec
             cur = dec
         }
         return null

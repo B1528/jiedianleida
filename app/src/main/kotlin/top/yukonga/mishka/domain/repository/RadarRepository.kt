@@ -44,4 +44,12 @@ interface RadarRepository {
      * 授权失效、磁盘满、provider 拒绝都返回 false，不抛异常（与 [fetch] 同一约定）。
      */
     suspend fun writeExport(treeUri: String, fileName: String, content: String): Boolean
+
+    /**
+     * 读回诊断日志原文，供界面直接展示。
+     *
+     * 雷达测速跑的是**独立内核**（独立端口 + 独立 secret），它的日志不进主日志页，
+     * 失败原因只能靠这条链路自己捞回来。实现不得抛异常，读不到就返回空串。
+     */
+    suspend fun readDiag(): String
 }

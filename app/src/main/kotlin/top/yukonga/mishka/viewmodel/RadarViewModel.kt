@@ -95,6 +95,11 @@ data class RadarUiState(
      * 必须与「测了但全挂」区分开，否则用户会以为这批节点全废了。
      */
     val testUnavailable: Boolean = false,
+    /**
+     * 拨测链路的诊断原文。雷达内核是独立进程（独立端口 + 独立 secret），它的日志不进主
+     * 日志页，测速失败时这里是唯一能说明「卡在哪一环」的东西。空串表示还没跑过或读不到。
+     */
+    val diagText: String = "",
 ) {
     /** 只有扫描完成后才允许点选目标行。 */
     val canPickTarget: Boolean get() = phase == RadarPhase.Done
@@ -392,6 +397,9 @@ class RadarViewModel(
                     .toSet()
             }
 
+            // 诊断原文在内核关掉之后取；readDiag 约定不抛异常，读不到就是空串
+            val diagText = runCatching { repository.readDiag() }.getOrDefault("")
+
             // 「全部通过」= 每个服务都拨通的节点。逐个服务求交，别写成
             // `sets.values.all { i in it }` 之外的花样 —— 一个服务都没答上来时交集必须为空，
             // 否则会把「没测」显示成「全通」
@@ -415,6 +423,7 @@ class RadarViewModel(
                     usable = usable,
                     testUnavailable = !kernelAnswered,
                     targets = targets.toPersistentList(),
+                    diagText = diagText,
                 )
             }
         }
@@ -439,6 +448,7 @@ class RadarViewModel(
                 pausedSources = 0,
                 parseFailed = 0,
                 testUnavailable = false,
+                diagText = "",
             )
         }
     }

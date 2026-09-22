@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,8 +47,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import top.yukonga.mishka.R
 import top.yukonga.mishka.ui.component.AdaptiveTopAppBar
+import top.yukonga.mishka.ui.component.CardItem
 import top.yukonga.mishka.ui.component.blur.BlurredBar
 import top.yukonga.mishka.ui.component.blur.rememberBlurBackdrop
+import top.yukonga.mishka.ui.component.groupedCardItems
 import top.yukonga.mishka.ui.util.WideContentBox
 import top.yukonga.mishka.ui.theme.StatusColors
 import top.yukonga.mishka.viewmodel.RadarPhase
@@ -173,11 +176,9 @@ fun RadarScreen(
                     ) {
                         item(key = "radar_header") { RadarHeaderCard(uiState) }
                         item(key = "radar_stats") { RadarStatsRow(uiState) }
-                        item(key = "radar_targets") {
-                            RadarTargetCard(
-                                uiState = uiState,
-                                onPick = viewModel::pickTarget,
-                            )
+                        radarTargetItems(uiState, viewModel::pickTarget)
+                        if (uiState.diagText.isNotBlank()) {
+                            item(key = "radar_diag") { RadarDiagCard(uiState.diagText) }
                         }
                     }
                 }
@@ -536,39 +537,86 @@ private fun StatCard(value: Int?, label: String, color: Color, modifier: Modifie
 }
 
 /** 各站点通过情况。扫描完成前不可点，选中为单选、再点取消。 */
-@Composable
-private fun RadarTargetCard(
+private fun LazyListScope.radarTargetItems(
     uiState: RadarUiState,
     onPick: (String) -> Unit,
 ) {
+    val items = buildList {
+        add(
+            CardItem("caption") {
+                Text(
+                    text = stringResource(R.string.radar_targets_caption),
+                    fontSize = 12.5.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 8.dp),
+                )
+            },
+        )
+        uiState.targets.forEach { target ->
+            add(
+                CardItem("t:${target.key}") {
+                    RadarTargetRow(
+                        target = target,
+                        selected = uiState.selectedTarget == target.key,
+                        value = when (uiState.phase) {
+                            RadarPhase.Idle -> null
+                            RadarPhase.Scanning, RadarPhase.Paused -> "…"
+                            RadarPhase.Done -> target.passed.toString()
+                        },
+                        clickable = uiState.canPickTarget,
+                        onClick = { onPick(target.key) },
+                    )
+                },
+            )
+        }
+    }
+    groupedCardItems(
+        keyPrefix = "radar_targets",
+        outerBottomPadding = ItemGap,
+        items = items,
+    )
+}
+
+/**
+ * 拨测诊断。雷达内核是独立进程（独立端口 + 独立 secret），它的日志不进主日志页，
+ * 「可用节点 = 0」时这里是唯一能说明卡在哪一环的东西。默认折叠，点一下展开。
+ */
+@Composable
+private fun RadarDiagCard(text: String) {
+    val expanded = remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = ItemGap)
             .padding(bottom = ItemGap)
-            .squircleBackground(MiuixTheme.colorScheme.surfaceContainer, CardRadius),
+            .squircleBackground(MiuixTheme.colorScheme.surfaceContainer, CardRadius)
+            .clickable { expanded.value = !expanded.value }
+            .padding(vertical = 14.dp, horizontal = 18.dp),
     ) {
-        Text(
-            text = stringResource(R.string.radar_targets_caption),
-            fontSize = 12.5.sp,
-            color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-            modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 8.dp),
-        )
-        uiState.targets.forEach { target ->
-            val selected = uiState.selectedTarget == target.key
-            RadarTargetRow(
-                target = target,
-                selected = selected,
-                value = when (uiState.phase) {
-                    RadarPhase.Idle -> null
-                    RadarPhase.Scanning, RadarPhase.Paused -> "…"
-                    RadarPhase.Done -> target.passed.toString()
-                },
-                clickable = uiState.canPickTarget,
-                onClick = { onPick(target.key) },
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.radar_diag_title),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (expanded.value) "▲" else "▼",
+                fontSize = 10.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
             )
         }
-        Spacer(Modifier.height(6.dp))
+        if (expanded.value) {
+            Text(
+                text = text,
+                fontSize = 10.sp,
+                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+        }
     }
 }
 

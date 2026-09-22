@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.input.TextFieldState
@@ -156,7 +157,7 @@ fun RadarSourcesScreen(
                 }
 
                 item(key = "radar_sources_tail") {
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(24.dp).navigationBarsPadding())
                 }
             }
         }
@@ -234,7 +235,7 @@ fun RadarSourcesScreen(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColorsPrimary(),
                         // 链接不做格式校验：输入是一回事，能不能用是另一回事
-                        enabled = nameState.text.isNotBlank(),
+                        enabled = nameState.text.isNotBlank() && urlState.text.isNotBlank(),
                         onClick = {
                             val name = nameState.text.toString().trim()
                             val url = urlState.text.toString().trim()

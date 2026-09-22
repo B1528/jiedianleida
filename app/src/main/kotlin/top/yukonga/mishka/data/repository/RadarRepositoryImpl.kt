@@ -69,6 +69,7 @@ class RadarRepositoryImpl(
 
     override suspend fun fetch(sources: List<RadarSourceInput>): RadarFetchResult =
         withContext(Dispatchers.IO) {
+            runCatching { File(ConfigGenerator.getWorkDir(context), "radar-diag.txt").writeText("") }
             val active = sources.filter { it.url.isNotBlank() }
             if (active.isEmpty()) return@withContext RadarFetchResult()
 
@@ -189,7 +190,11 @@ class RadarRepositoryImpl(
             // 也不再声明 radar provider，PUT 只会 404。
             // **不能直接返回空表** —— 那等于要求用户先开代理才能测，而代理能不能起来
             // 恰恰取决于这批节点通不通，是个死锁。
-            val kernel = startKernel() ?: return@withContext emptyList()
+            val kernel = startKernel()
+            if (kernel == null) {
+                diag("startKernel failed")
+                return@withContext emptyList()
+            }
             try {
                 testOnKernel(nodes, serviceUrl, kernel.endpoint, kernel.secret)
             } finally {
@@ -216,17 +221,24 @@ class RadarRepositoryImpl(
 
             providerFile.parentFile?.mkdirs()
             providerFile.writeText(SubscriptionRenderer.clashProvider(nodes), Charsets.UTF_8)
-            api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
+            diag("nodes=${nodes.size}")
+            try {
+                api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
+                diag("updateProvider ok")
+            } catch (e: Throwable) {
+                diag("updateProvider failed: ${e.message}")
+                throw e
+            }
 
             // 写文件成功、PUT 回 204 都不代表内核真接受了这份 provider：YAML 里哪怕只有一个
             // 非法字符，mihomo 也会整份丢弃并静默加载 0 个代理，随后所有 healthcheck 404，
             // 最终表现成「全部节点不可用」。这里回读一次，0 个节点直接作废整轮测试。
             val loaded = api.getProviders()
                 .providers[RuntimeOverrideBuilder.RADAR_PROVIDER_NAME]?.proxies?.size ?: 0
-            if (loaded == 0) return emptyList()
+            diag("provider loaded=$loaded")
 
             val gate = Semaphore(TEST_CONCURRENCY)
-            coroutineScope {
+            val results = coroutineScope {
                 nodes.mapIndexed { i, n ->
                     async {
                         gate.withPermit {
@@ -248,9 +260,12 @@ class RadarRepositoryImpl(
                     }
                 }.awaitAll()
             }
+            diag("tested=${results.size} passed=${results.count { it.delayMs > 0 }}")
+            results
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
+            diag("testOnKernel threw: ${e.message}")
             emptyList()
         } finally {
             api.close()
@@ -316,6 +331,21 @@ class RadarRepositoryImpl(
           "log-level": "warning"
         }
     """.trimIndent()
+
+    /** 诊断日志：雷达链路哪一环静默失败都只能靠它定位 */
+    private fun diag(msg: String) {
+        runCatching {
+            File(ConfigGenerator.getWorkDir(context), "radar-diag.txt")
+                .appendText("${System.currentTimeMillis()}  $msg\n")
+        }
+    }
+
+    /** 读回诊断文件供界面展示，省得用户还要去 files/mihomo/ 里拷 */
+    override suspend fun readDiag(): String = withContext(Dispatchers.IO) {
+        runCatching {
+            File(ConfigGenerator.getWorkDir(context), "radar-diag.txt").readText()
+        }.getOrDefault("")
+    }
 
     private fun jsonEscape(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"")
