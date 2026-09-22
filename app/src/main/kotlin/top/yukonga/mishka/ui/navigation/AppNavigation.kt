@@ -27,6 +27,8 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +82,8 @@ import top.yukonga.mishka.ui.screen.home.HomeScreen
 import top.yukonga.mishka.ui.screen.log.LogScreen
 import top.yukonga.mishka.ui.screen.provider.ProviderScreen
 import top.yukonga.mishka.ui.screen.proxy.ProxyScreen
+import top.yukonga.mishka.ui.screen.radar.RadarScreen
+import top.yukonga.mishka.ui.screen.radar.RadarSourcesScreen
 import top.yukonga.mishka.ui.screen.settings.AboutScreen
 import top.yukonga.mishka.ui.screen.settings.AppProxyScreen
 import top.yukonga.mishka.ui.screen.settings.BackupRestoreScreen
@@ -115,6 +119,7 @@ import top.yukonga.mishka.viewmodel.MetaSettingsViewModel
 import top.yukonga.mishka.viewmodel.NetworkSettingsViewModel
 import top.yukonga.mishka.viewmodel.ProviderViewModel
 import top.yukonga.mishka.viewmodel.ProxyViewModel
+import top.yukonga.mishka.viewmodel.RadarViewModel
 import top.yukonga.mishka.viewmodel.SubscriptionViewModel
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
 import top.yukonga.miuix.kmp.basic.Icon
@@ -185,6 +190,7 @@ fun AppNavigation(
     homeViewModel: HomeViewModel? = null,
     subscriptionViewModel: SubscriptionViewModel? = null,
     proxyViewModel: ProxyViewModel? = null,
+    radarViewModel: RadarViewModel? = null,
     logViewModel: LogViewModel? = null,
     providerViewModel: ProviderViewModel? = null,
     connectionViewModel: ConnectionViewModel? = null,
@@ -210,7 +216,7 @@ fun AppNavigation(
 ) {
     val backStack = rememberSaveable(saver = NavBackStackSaver) { mutableStateListOf(Route.Main) }
     val navigator = remember { Navigator(backStack) }
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 5 })
     val useNavigationRail = rememberIsWideScreen()
     val mainPagerState = rememberMainPagerState(
         pagerState = pagerState,
@@ -221,7 +227,7 @@ fun AppNavigation(
     LaunchedEffect(deepLinkImport) {
         if (deepLinkImport != null) {
             navigator.popUntil { key -> key is Route.Main }
-            mainPagerState.animateToPage(2)
+            mainPagerState.animateToPage(3)
             navigator.push(
                 Route.SubscriptionAddUrl(
                     initialUrl = deepLinkImport.url,
@@ -270,6 +276,7 @@ fun AppNavigation(
                     homeViewModel,
                     proxyViewModel,
                     subscriptionViewModel,
+                    radarViewModel,
                     navigator,
                     mainPagerState,
                     bootStartManager,
@@ -279,6 +286,14 @@ fun AppNavigation(
                     hasRootPermission,
                     useNavigationRail,
                 )
+            }
+            entry<Route.RadarSources>(swipeDismiss = swipeDismiss) {
+                radarViewModel?.let {
+                    RadarSourcesScreen(
+                        viewModel = it,
+                        onBack = { navigator.pop() },
+                    )
+                }
             }
             entry<Route.SubscriptionAdd>(swipeDismiss = swipeDismiss) {
                 SubscriptionAddScreen(
@@ -485,6 +500,7 @@ private fun MainPage(
     homeViewModel: HomeViewModel?,
     proxyViewModel: ProxyViewModel?,
     subscriptionViewModel: SubscriptionViewModel?,
+    radarViewModel: RadarViewModel? = null,
     navigator: Navigator,
     mainPagerState: MainPagerState,
     bootStartManager: BootStartManager? = null,
@@ -544,7 +560,16 @@ private fun MainPage(
                 )
 
                 1 -> ProxyScreen(bottomPadding = bottomPadding, viewModel = proxyViewModel)
-                2 -> subscriptionViewModel?.let {
+
+                2 -> radarViewModel?.let {
+                    RadarScreen(
+                        viewModel = it,
+                        bottomPadding = bottomPadding,
+                        onAddSource = { navigator.push(Route.RadarSources) },
+                    )
+                }
+
+                3 -> subscriptionViewModel?.let {
                     SubscriptionScreen(
                         viewModel = it,
                         bottomPadding = bottomPadding,
@@ -554,7 +579,7 @@ private fun MainPage(
                     )
                 }
 
-                3 -> SettingsScreen(
+                4 -> SettingsScreen(
                     bottomPadding = bottomPadding,
                     onNavigateVpnSettings = { navigator.push(Route.VpnSettings) },
                     onNavigateRootSettings = { navigator.push(Route.RootSettings) },
@@ -607,12 +632,18 @@ private fun MainPage(
                     NavigationRailItem(
                         selected = selectedPage == 2,
                         onClick = { mainPagerState.animateToPage(2) },
-                        icon = MiuixIcons.UploadCloud,
-                        label = stringResource(R.string.nav_subscription),
+                        icon = Icons.Rounded.Radar,
+                        label = stringResource(R.string.nav_radar),
                     )
                     NavigationRailItem(
                         selected = selectedPage == 3,
                         onClick = { mainPagerState.animateToPage(3) },
+                        icon = MiuixIcons.UploadCloud,
+                        label = stringResource(R.string.nav_subscription),
+                    )
+                    NavigationRailItem(
+                        selected = selectedPage == 4,
+                        onClick = { mainPagerState.animateToPage(4) },
                         icon = MiuixIcons.Settings,
                         label = stringResource(R.string.nav_settings),
                     )
@@ -670,6 +701,7 @@ private fun MainPage(
         val navigationItems = listOf(
             NavigationItem(label = stringResource(R.string.nav_home), icon = MiuixIcons.Home),
             NavigationItem(label = stringResource(R.string.nav_proxy), icon = MiuixIcons.Tune),
+            NavigationItem(label = stringResource(R.string.nav_radar), icon = Icons.Rounded.Radar),
             NavigationItem(label = stringResource(R.string.nav_subscription), icon = MiuixIcons.UploadCloud),
             NavigationItem(label = stringResource(R.string.nav_settings), icon = MiuixIcons.Settings),
         )

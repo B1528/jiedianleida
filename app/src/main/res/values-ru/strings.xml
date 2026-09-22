@@ -68,8 +68,43 @@
     <!-- Navigation -->
     <string name="nav_home">Главная</string>
     <string name="nav_proxy">Прокси</string>
+    <string name="nav_radar">Радар</string>
     <string name="nav_subscription">Подписки</string>
     <string name="nav_settings">Настройки</string>
+
+    <!-- Radar -->
+    <string name="radar_title">Радар</string>
+    <string name="radar_sources">Источники</string>
+    <string name="radar_add_source">Добавить источник</string>
+    <string name="radar_add_source_summary">Файл GitHub, ссылка на подписку или отдельная ссылка</string>
+    <string name="radar_scan_options">Параметры сканирования</string>
+    <string name="radar_option_dedupe">Удалять дубликаты</string>
+    <string name="radar_option_dedupe_summary">По протоколу, серверу, порту и учётным данным</string>
+    <string name="radar_start_scan">Начать сканирование</string>
+    <string name="radar_state_idle_title">Сканирование ещё не выполнялось</string>
+    <string name="radar_state_idle_hint">Узлы будут загружены, дедуплицированы и проверены по каждой цели ниже</string>
+    <string name="radar_state_done_title">Сканирование завершено</string>
+    <string name="radar_state_done_hint">Выберите цель, чтобы экспортировать только реально работающие для неё узлы</string>
+    <string name="radar_stage_fetch">Загрузка узлов</string>
+    <string name="radar_stage_parse">Разбор узлов</string>
+    <string name="radar_stage_dedupe">Дедупликация</string>
+    <string name="radar_stage_test">Проверка узлов</string>
+    <string name="radar_stage_done">Готово</string>
+    <string name="radar_stage_running">Выполняется</string>
+    <string name="radar_stat_fetched">Загружено</string>
+    <string name="radar_stat_deduped">После дедупликации</string>
+    <string name="radar_stat_usable">Доступно</string>
+    <string name="radar_targets_caption">Доступность по целям</string>
+    <string name="radar_action_scan">Начать сканирование</string>
+    <string name="radar_action_scanning">Сканирование…</string>
+    <string name="radar_action_reset">Сбросить</string>
+    <string name="radar_action_export">Экспорт %1$s</string>
+    <string name="radar_test_unavailable">Прокси не запущен, узлы не проверены</string>
+    <string name="radar_sources_failed">Не удалось загрузить источников: %1$d</string>
+    <string name="radar_source_add_title">Добавить источник</string>
+    <string name="radar_source_edit_title">Изменить источник</string>
+    <string name="radar_source_name">Название</string>
+    <string name="radar_source_url">Ссылка на узел</string>
 
     <!-- Common -->
     <string name="common_confirm">ОК</string>

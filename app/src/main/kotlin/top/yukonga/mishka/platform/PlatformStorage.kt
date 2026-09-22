@@ -115,6 +115,9 @@ object StorageKeys {
     const val WEBDAV_URL = "webdav_url"
     const val WEBDAV_USERNAME = "webdav_username"
     const val WEBDAV_PASSWORD = "webdav_password"
+
+    // 雷达的节点源列表（JSON 数组字符串）。用户不删就一直留着，重启不掉
+    const val RADAR_SOURCES = "radar_sources"
 }
 
 class PlatformStorage(context: Context) {

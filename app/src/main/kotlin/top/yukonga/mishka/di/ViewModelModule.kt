@@ -14,6 +14,7 @@ import top.yukonga.mishka.viewmodel.MetaSettingsViewModel
 import top.yukonga.mishka.viewmodel.NetworkSettingsViewModel
 import top.yukonga.mishka.viewmodel.ProviderViewModel
 import top.yukonga.mishka.viewmodel.ProxyViewModel
+import top.yukonga.mishka.viewmodel.RadarViewModel
 import top.yukonga.mishka.viewmodel.SubscriptionViewModel
 
 /**
@@ -41,6 +42,7 @@ val viewModelModule = module {
         )
     }
     single { AppProxyViewModel(get(), get(), get()) }
+    single { RadarViewModel(get(), get()) }
     single { NetworkSettingsViewModel(get()) }
     single { MetaSettingsViewModel(get()) }
     single { ExternalControlViewModel(get()) }

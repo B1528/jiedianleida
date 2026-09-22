@@ -68,8 +68,43 @@
     <!-- Navigation -->
     <string name="nav_home">首頁</string>
     <string name="nav_proxy">代理</string>
+    <string name="nav_radar">雷達</string>
     <string name="nav_subscription">訂閱</string>
     <string name="nav_settings">設定</string>
+
+    <!-- Radar -->
+    <string name="radar_title">雷達</string>
+    <string name="radar_sources">訂閱來源</string>
+    <string name="radar_add_source">新增訂閱來源</string>
+    <string name="radar_add_source_summary">支援 GitHub 原始檔案、訂閱連結或單一分享連結</string>
+    <string name="radar_scan_options">掃描選項</string>
+    <string name="radar_option_dedupe">自動去重</string>
+    <string name="radar_option_dedupe_summary">依協定、伺服器、連接埠與憑證去重</string>
+    <string name="radar_start_scan">開始掃描</string>
+    <string name="radar_state_idle_title">還沒有掃描過</string>
+    <string name="radar_state_idle_hint">節點會被抓取、去重，再逐個測試下面這些目標</string>
+    <string name="radar_state_done_title">掃描完成</string>
+    <string name="radar_state_done_hint">點下面任一目標，只匯出能真正連上它的節點</string>
+    <string name="radar_stage_fetch">抓取節點</string>
+    <string name="radar_stage_parse">解析節點</string>
+    <string name="radar_stage_dedupe">去重合併</string>
+    <string name="radar_stage_test">測試節點</string>
+    <string name="radar_stage_done">完成</string>
+    <string name="radar_stage_running">進行中</string>
+    <string name="radar_stat_fetched">本次抓取</string>
+    <string name="radar_stat_deduped">去重節點</string>
+    <string name="radar_stat_usable">可用節點</string>
+    <string name="radar_targets_caption">各站點通過情況</string>
+    <string name="radar_action_scan">開始掃描</string>
+    <string name="radar_action_scanning">掃描中…</string>
+    <string name="radar_action_reset">重設</string>
+    <string name="radar_action_export">匯出 %1$s</string>
+    <string name="radar_test_unavailable">代理未執行，沒有做連線測試</string>
+    <string name="radar_sources_failed">有 %1$d 個來源抓取失敗</string>
+    <string name="radar_source_add_title">新增節點來源</string>
+    <string name="radar_source_edit_title">編輯節點來源</string>
+    <string name="radar_source_name">名稱</string>
+    <string name="radar_source_url">節點連結</string>
 
     <!-- Common -->
     <string name="common_confirm">確定</string>

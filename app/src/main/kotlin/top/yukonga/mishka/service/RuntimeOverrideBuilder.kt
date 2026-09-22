@@ -5,6 +5,8 @@ import kotlinx.serialization.json.Json
 import top.yukonga.mishka.domain.model.ConfigurationOverride
 import top.yukonga.mishka.domain.model.DnsOverride
 import top.yukonga.mishka.domain.model.ProfileOverride
+import top.yukonga.mishka.domain.model.ProviderHealthCheckOverride
+import top.yukonga.mishka.domain.model.ProxyProviderOverride
 import top.yukonga.mishka.domain.model.TunOverride
 import top.yukonga.mishka.platform.PlatformStorage
 import top.yukonga.mishka.platform.StorageKeys
@@ -37,6 +39,36 @@ object RuntimeOverrideBuilder {
     // 「通过代理更新订阅」开启且用户未显式配置 mixed-port 时的兜底默认值，
     // 确保 mihomo 一定监听 HTTP 代理端口，让 SubscriptionProxyResolver 稳定解析到
     internal const val DEFAULT_MIXED_PORT = 7890
+
+    // 雷达测速的载体：一个 type: file 的 proxy-provider。候选节点写进同一个文件后
+    // PUT /providers/proxies/radar 即可热加载生效 —— embed mode 禁掉了 /configs 热重载，
+    // 重启内核又会断掉用户当前的连接，file provider 是唯一不打扰用户的注入通道。
+    internal const val RADAR_PROVIDER_NAME = "radar"
+    internal const val RADAR_PROVIDER_FILE = "radar-provider.yaml"
+
+    private const val RADAR_HEALTHCHECK_URL = "http://www.gstatic.com/generate_204"
+    private const val RADAR_HEALTHCHECK_INTERVAL = 300
+
+    /** provider 文件的唯一来源：装配 override 和雷达写文件必须指向同一个路径 */
+    internal fun radarProviderFile(context: Context): File =
+        File(ConfigGenerator.getWorkDir(context), RADAR_PROVIDER_FILE)
+
+    /**
+     * 声明雷达 provider。启动期就写进 override，之后雷达只覆写文件内容。
+     * 文件不存在时 mihomo 视为空 provider，不影响启动。
+     */
+    private fun buildRadarProvider(context: Context): Map<String, ProxyProviderOverride> =
+        mapOf(
+            RADAR_PROVIDER_NAME to ProxyProviderOverride(
+                type = "file",
+                path = radarProviderFile(context).absolutePath,
+                healthCheck = ProviderHealthCheckOverride(
+                    enable = true,
+                    url = RADAR_HEALTHCHECK_URL,
+                    interval = RADAR_HEALTHCHECK_INTERVAL,
+                ),
+            ),
+        )
 
     private val json = Json {
         encodeDefaults = false
@@ -106,6 +138,8 @@ object RuntimeOverrideBuilder {
             dns = buildDnsOverride(tunMode, userOverride.dns),
             tun = buildTunOverride(context, tunMode, tunFd, userOverride.tun),
             profile = ProfileOverride(storeSelected = false, storeFakeIp = true),
+            // 用户自带 proxy-providers 时并存，雷达那个同名会覆盖（名字固定，冲突概率可忽略）
+            proxyProviders = (userOverride.proxyProviders ?: emptyMap()) + buildRadarProvider(context),
         )
         // 原子写：mihomo 紧接着就以 --override-json 读它，半个 JSON 会让启动失败且难以定位
         val file = File(ConfigGenerator.getWorkDir(context), FILE_NAME)

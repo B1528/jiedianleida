@@ -70,8 +70,43 @@
     <!-- Navigation -->
     <string name="nav_home">Home</string>
     <string name="nav_proxy">Proxy</string>
+    <string name="nav_radar">Radar</string>
     <string name="nav_subscription">Subscriptions</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- Radar -->
+    <string name="radar_title">Radar</string>
+    <string name="radar_sources">Sources</string>
+    <string name="radar_add_source">Add source</string>
+    <string name="radar_add_source_summary">GitHub raw file, subscription URL or a single share link</string>
+    <string name="radar_scan_options">Scan options</string>
+    <string name="radar_option_dedupe">Deduplicate</string>
+    <string name="radar_option_dedupe_summary">Drop duplicates by protocol, server, port and credentials</string>
+    <string name="radar_start_scan">Start scan</string>
+    <string name="radar_state_idle_title">Not scanned yet</string>
+    <string name="radar_state_idle_hint">Nodes are fetched, deduplicated and then tested against every target below</string>
+    <string name="radar_state_done_title">Scan complete</string>
+    <string name="radar_state_done_hint">Tap a target to export only the nodes that can actually reach it</string>
+    <string name="radar_stage_fetch">Fetching nodes</string>
+    <string name="radar_stage_parse">Parsing nodes</string>
+    <string name="radar_stage_dedupe">Deduplicating</string>
+    <string name="radar_stage_test">Testing nodes</string>
+    <string name="radar_stage_done">Done</string>
+    <string name="radar_stage_running">Running</string>
+    <string name="radar_stat_fetched">Fetched</string>
+    <string name="radar_stat_deduped">Deduplicated</string>
+    <string name="radar_stat_usable">Usable</string>
+    <string name="radar_targets_caption">Reachability by target</string>
+    <string name="radar_action_scan">Start scan</string>
+    <string name="radar_action_scanning">Scanning…</string>
+    <string name="radar_action_reset">Reset</string>
+    <string name="radar_action_export">Export %1$s</string>
+    <string name="radar_test_unavailable">Proxy is not running, so the nodes were not tested</string>
+    <string name="radar_sources_failed">%1$d sources failed to load</string>
+    <string name="radar_source_add_title">Add source</string>
+    <string name="radar_source_edit_title">Edit source</string>
+    <string name="radar_source_name">Name</string>
+    <string name="radar_source_url">Node link</string>
 
     <!-- Common -->
     <string name="common_confirm">OK</string>

@@ -54,6 +54,7 @@ import top.yukonga.mishka.viewmodel.MetaSettingsViewModel
 import top.yukonga.mishka.viewmodel.NetworkSettingsViewModel
 import top.yukonga.mishka.viewmodel.ProviderViewModel
 import top.yukonga.mishka.viewmodel.ProxyViewModel
+import top.yukonga.mishka.viewmodel.RadarViewModel
 import top.yukonga.mishka.viewmodel.SubscriptionViewModel
 
 private const val STATE_DEEPLINK_NONCE = "deeplink_nonce"
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var homeViewModel: HomeViewModel
     private lateinit var subscriptionViewModel: SubscriptionViewModel
     private lateinit var proxyViewModel: ProxyViewModel
+    private lateinit var radarViewModel: RadarViewModel
     private lateinit var logViewModel: LogViewModel
     private lateinit var providerViewModel: ProviderViewModel
     private lateinit var connectionViewModel: ConnectionViewModel
@@ -196,6 +198,7 @@ class MainActivity : ComponentActivity() {
         appProxyViewModel = get()
         subscriptionViewModel = get()
         proxyViewModel = get()
+        radarViewModel = get()
         homeViewModel = get()
 
         // 监听共享 connectionManager 的 repository：mihomo 重启时单点 close 旧 + new 新
@@ -243,6 +246,7 @@ class MainActivity : ComponentActivity() {
                 homeViewModel = homeViewModel,
                 subscriptionViewModel = subscriptionViewModel,
                 proxyViewModel = proxyViewModel,
+                radarViewModel = radarViewModel,
                 logViewModel = logViewModel,
                 providerViewModel = providerViewModel,
                 connectionViewModel = connectionViewModel,

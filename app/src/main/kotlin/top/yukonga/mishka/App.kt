@@ -31,6 +31,7 @@ import top.yukonga.mishka.viewmodel.MetaSettingsViewModel
 import top.yukonga.mishka.viewmodel.NetworkSettingsViewModel
 import top.yukonga.mishka.viewmodel.ProviderViewModel
 import top.yukonga.mishka.viewmodel.ProxyViewModel
+import top.yukonga.mishka.viewmodel.RadarViewModel
 import top.yukonga.mishka.viewmodel.SubscriptionViewModel
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.LocalContentColor
@@ -46,6 +47,7 @@ fun App(
     homeViewModel: HomeViewModel? = null,
     subscriptionViewModel: SubscriptionViewModel? = null,
     proxyViewModel: ProxyViewModel? = null,
+    radarViewModel: RadarViewModel? = null,
     logViewModel: LogViewModel? = null,
     providerViewModel: ProviderViewModel? = null,
     connectionViewModel: ConnectionViewModel? = null,
@@ -131,6 +133,7 @@ fun App(
                 homeViewModel = homeViewModel,
                 subscriptionViewModel = subscriptionViewModel,
                 proxyViewModel = proxyViewModel,
+                radarViewModel = radarViewModel,
                 logViewModel = logViewModel,
                 providerViewModel = providerViewModel,
                 connectionViewModel = connectionViewModel,

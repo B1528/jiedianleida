@@ -36,6 +36,7 @@ data class ConfigurationOverride(
     @SerialName("sniffer") val sniffer: SnifferOverride? = null,
     @SerialName("tun") val tun: TunOverride? = null,
     @SerialName("profile") val profile: ProfileOverride? = null,
+    @SerialName("proxy-providers") val proxyProviders: Map<String, ProxyProviderOverride>? = null,
 )
 
 @Serializable
@@ -90,6 +91,29 @@ data class TunOverride(
 data class ProfileOverride(
     @SerialName("store-selected") val storeSelected: Boolean? = null,
     @SerialName("store-fake-ip") val storeFakeIp: Boolean? = null,
+)
+
+/**
+ * proxy-provider 覆写。雷达测速拿一个 `type: file` 的 provider 当载体 —— 候选节点写进
+ * [path] 指向的文件，`PUT /providers/proxies/{name}` 热加载即可生效，不必重启内核
+ * （重启会断掉用户当前的连接）。
+ */
+@Serializable
+data class ProxyProviderOverride(
+    @SerialName("type") val type: String? = null,
+    @SerialName("path") val path: String? = null,
+    @SerialName("health-check") val healthCheck: ProviderHealthCheckOverride? = null,
+)
+
+/**
+ * provider 的健康检查配置。批量端点 `/{provider}/healthcheck` 不收 url 参数，用的就是这里
+ * 的 url；要按服务（YouTube / Google）分别测，走单节点端点 `/{provider}/{name}/healthcheck?url=`。
+ */
+@Serializable
+data class ProviderHealthCheckOverride(
+    @SerialName("enable") val enable: Boolean? = null,
+    @SerialName("url") val url: String? = null,
+    @SerialName("interval") val interval: Int? = null,
 )
 
 /**

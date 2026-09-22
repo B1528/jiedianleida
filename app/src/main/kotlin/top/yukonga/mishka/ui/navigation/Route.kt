@@ -75,4 +75,8 @@ sealed interface Route : NavKey {
 
     @Serializable
     data object About : Route
+
+    /** 节点源管理页（从雷达页右上角「＋」进入）。 */
+    @Serializable
+    data object RadarSources : Route
 }
