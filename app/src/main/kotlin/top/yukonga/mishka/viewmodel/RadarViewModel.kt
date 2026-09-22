@@ -1,5 +1,8 @@
 package top.yukonga.mishka.viewmodel
 
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,7 +19,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import top.yukonga.mishka.R
 import top.yukonga.mishka.domain.model.RadarExportTarget
+import top.yukonga.mishka.domain.model.RadarFetchResult
 import top.yukonga.mishka.domain.model.RadarNode
 import top.yukonga.mishka.domain.model.RadarSourceInput
 import top.yukonga.mishka.domain.repository.RadarRepository
@@ -29,12 +34,13 @@ import top.yukonga.mishka.platform.StorageKeys
  *
  * 源列表落在 [PlatformStorage]（JSON 字符串），只要用户不删就一直在。
  *
- * 测速必须经过内核：L1 的 TCP 连通性对 vless/trojan 这类协议给不出结论（端口开着但
- * 握手被拒是常态），只有 mihomo 真拨一次才算数。所以 [RadarRepository.test] 会把节点
- * 灌进内核的 file provider 再逐个 healthcheck，**这一步要求代理正在运行**；没跑时内核
- * 没起来，任何数字都是编的，于是置 [RadarUiState.testUnavailable] 让页面说明原因。
+ * **扫描分两段，中间必须停一次**：抓取要一个能翻墙的出口（源多半在 GitHub raw），
+ * 内核拨测要一个干净出口（被别的 VPN 劫持时测出来的不是节点本身的可达性）。这两段的
+ * 网络需求互相矛盾，而 Android 同时只允许一个 VPN 生效，所以只能让用户手动切换。
+ * 断点落在「抓取完、解析前」——解析与去重都是纯文本处理，不碰网络，放在切换之后做
+ * 既不影响结果，也省得用户开着 VPN 干等。
  */
-enum class RadarPhase { Idle, Scanning, Done }
+enum class RadarPhase { Idle, Scanning, Paused, Done }
 
 /** 流水线的四个阶段，顺序即展示顺序。 */
 enum class RadarStage { Fetch, Parse, Dedupe, Test }
@@ -49,7 +55,7 @@ data class RadarSource(
 )
 
 /**
- * 一个检测目标（GitHub / YouTube / …）能连上的节点数。
+ * 一个检测目标能连上的节点数。
  *
  * [passed] 的语义是「这个节点**真的能访问**该目标」，而不是「TCP 通了」——只看通不通
  * 的话，导入之后仍要逐个试能不能连上 Google，那这个数就没有意义。
@@ -75,8 +81,15 @@ data class RadarUiState(
     val selectedTarget: String? = null,
     /** 抓取失败的源数量。非 0 时扫描仍然算完成，只是结果里少了那几个源 */
     val failedSources: Int = 0,
+    /** 暂停态提示用：这一轮实际下回来了几个源 */
+    val pausedSources: Int = 0,
     /**
-     * 拨测整个没跑起来（代理未运行 / provider 写不进去），所有目标都是 0 而不是真的都连不上。
+     * 当前导出目录的显示名；null 表示还没选过。真正的 tree uri 留在 ViewModel 里不进状态 ——
+     * 屏幕只需要「显示什么」，不需要拿它去拼路径。
+     */
+    val exportDirLabel: String? = null,
+    /**
+     * 拨测整个没跑起来（内核拉不起来 / provider 写不进去），所有目标都是 0 而不是真的都连不上。
      * 必须与「测了但全挂」区分开，否则用户会以为这批节点全废了。
      */
     val testUnavailable: Boolean = false,
@@ -102,7 +115,8 @@ data class RadarSourcesUiState(
 }
 
 /**
- * 一个拨测目标。名字全是专有名词，四种语言下写法一致，所以不做资源化。
+ * 一个拨测目标。名字全是专有名词，四种语言下写法一致，所以不做资源化
+ * （唯一例外是「全部通过」那一行，它走 `R.string.radar_target_all`）。
  *
  * 探针优先挑各家的 204 / 小体积端点：`generate_204` 只回状态行不回 body，拨测耗时里
  * 几乎全是握手与 RTT，不会被下载时间污染。
@@ -113,12 +127,23 @@ private val RADAR_SERVICES = listOf(
     RadarService("google", "Google", "http://www.google.com/generate_204"),
     RadarService("youtube", "YouTube", "https://www.youtube.com/generate_204"),
     RadarService("github", "GitHub", "https://github.com/robots.txt"),
+    RadarService("chatgpt", "ChatGPT", "https://chatgpt.com/robots.txt"),
+    RadarService("x", "X", "https://x.com/robots.txt"),
+    RadarService("cloudflare", "Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace"),
+    RadarService("grok", "Grok", "https://grok.com/robots.txt"),
     RadarService("telegram", "Telegram", "https://telegram.org/"),
 )
+
+/**
+ * 「全部通过」那一行的 key。**不进 [RADAR_SERVICES]** —— 它不是要拨测的服务，
+ * 而是其余服务通过集合的交集，没有自己的探针地址。
+ */
+private const val RADAR_TARGET_ALL = "all"
 
 class RadarViewModel(
     private val repository: RadarRepository,
     private val storage: PlatformStorage,
+    private val context: Context,
 ) : ViewModel() {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -129,14 +154,23 @@ class RadarViewModel(
     /** 当前扫描任务。重扫或离开时 cancel 掉，避免两轮扫描同时往 UI 写 */
     private var scanJob: Job? = null
 
-    /** 最近一次扫描出来的节点本体，导出时用。不进 UiState —— 上千条塞进去会让每次状态变更都全量 diff */
+    /**
+     * 抓取阶段的产物。正文可能有几 MB，不进 UiState —— 每次都全量 diff 不值。
+     * 暂停期间就靠它把两段接起来；进程被杀就没了，重扫一次即可。
+     */
+    private var fetchResult: RadarFetchResult? = null
+
+    /** 最近一次扫描出来的节点本体，导出时用。同样不进 UiState */
     private var scannedNodes: List<RadarNode> = emptyList()
 
     /**
-     * 每个目标通过的节点下标。也不进 UiState（同上，几千个 Int 每帧 diff 不值），
-     * 但导出必须靠它把「选中 Google」翻译成具体的节点子集。
+     * 每个目标通过的节点下标（含 [RADAR_TARGET_ALL]）。导出必须靠它把「选中 Google」
+     * 翻译成具体的节点子集 —— 只导出通过的节点，这个功能才有意义。
      */
     private var passSets: Map<String, Set<Int>> = emptyMap()
+
+    /** 上次选定的导出目录（SAF tree uri）。null 表示还没选过，此时导出前要先弹目录选择器 */
+    private var exportDirUri: String? = null
 
     private fun update(transform: (RadarUiState) -> RadarUiState) {
         _uiState.value = transform(_uiState.value)
@@ -157,7 +191,13 @@ class RadarViewModel(
         // 新 id 从已有最大序号往后接，删掉中间几条也不会撞号
         sourceSeq = loaded.mapNotNull { it.id.removePrefix("s").toIntOrNull() }.maxOrNull()?.plus(1) ?: 0
         _sourcesState.value = RadarSourcesUiState(draft = loaded, saved = loaded)
-        _uiState.value = _uiState.value.copy(sources = loaded)
+
+        // 导出目录跨会话记住；存的是空串就当作没选过
+        exportDirUri = storage.getString(StorageKeys.RADAR_EXPORT_TREE, "").ifEmpty { null }
+        _uiState.value = _uiState.value.copy(
+            sources = loaded,
+            exportDirLabel = exportDirUri?.let(::dirLabel),
+        )
     }
 
     private fun loadSources(): ImmutableList<RadarSource> {
@@ -234,9 +274,9 @@ class RadarViewModel(
 
     fun clearSelection() = update { it.copy(selectedTarget = null) }
 
-    // === 扫描 ===
+    // === 扫描：第一段（抓取） ===
 
-    /** 点「开始扫描」走这里：真抓取 → 抽取 → 解析 → 去重 → 内核拨测。 */
+    /** 点「开始扫描」走这里：只抓取，抓完停在 [RadarPhase.Paused] 等用户关掉别的 VPN。 */
     fun startScan() {
         if (_uiState.value.phase == RadarPhase.Scanning) return
 
@@ -252,30 +292,20 @@ class RadarViewModel(
                     targets = persistentListOf(),
                     selectedTarget = null,
                     failedSources = 0,
+                    pausedSources = 0,
                     testUnavailable = false,
                 )
             }
             scannedNodes = emptyList()
             passSets = emptyMap()
+            fetchResult = null
 
             val inputs = _uiState.value.sources
                 .filter { it.enabled }
                 .map { RadarSourceInput(it.id, it.name, it.url) }
 
             val result = try {
-                repository.scan(
-                    sources = inputs,
-                    // 抓完源正文即 Fetch 完成；抽取与去重是同一次遍历，只在结束后报一次
-                    onFetched = { n -> update { it.copy(stageDone = maxOf(it.stageDone, 1), fetched = n) } },
-                    onDeduped = { n ->
-                        update {
-                            it.copy(
-                                stageDone = maxOf(it.stageDone, RadarStage.Test.ordinal),
-                                deduped = n,
-                            )
-                        }
-                    },
-                )
+                repository.fetch(inputs)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -284,24 +314,59 @@ class RadarViewModel(
                 return@launch
             }
 
+            fetchResult = result
+            update {
+                it.copy(
+                    phase = RadarPhase.Paused,
+                    stageDone = 1,
+                    pausedSources = result.fetchedSources,
+                    failedSources = result.failures.size,
+                )
+            }
+        }
+    }
+
+    // === 扫描：第二段（解析 → 去重 → 拨测） ===
+
+    /**
+     * 点「继续执行」走这里。到这一步用户应当已经关掉其他 VPN —— 内核拨测要被测节点
+     * 自己出网，多一层 VPN 会让结果变成「经过那个出口之后能不能连上」。
+     */
+    fun continueScan() {
+        val pending = fetchResult ?: return
+        if (_uiState.value.phase != RadarPhase.Paused) return
+
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            update { it.copy(phase = RadarPhase.Scanning, stageDone = 1) }
+
+            val result = try {
+                repository.parse(pending)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                update { it.copy(phase = RadarPhase.Idle, stageDone = 0) }
+                return@launch
+            }
+
             scannedNodes = result.nodes
+            update {
+                it.copy(
+                    stageDone = RadarStage.Test.ordinal,
+                    fetched = result.fetched,
+                    deduped = result.deduped,
+                    failedSources = result.failures.size,
+                )
+            }
 
             if (result.nodes.isEmpty()) {
-                update {
-                    it.copy(
-                        phase = RadarPhase.Done,
-                        stageDone = RadarStage.entries.size,
-                        fetched = result.fetched,
-                        deduped = result.deduped,
-                        failedSources = result.failures.size,
-                    )
-                }
+                update { it.copy(phase = RadarPhase.Done, stageDone = RadarStage.entries.size) }
                 return@launch
             }
 
             // === 测速：每个目标一次全量拨测 ===
             //
-            // 一次扫描要拨 目标数 × 节点数 次真实握手（4 × 上千 ≈ 数千次），所以这里串行跑目标、
+            // 一次扫描要拨 目标数 × 节点数 次真实握手（8 × 上千 ≈ 上万次），所以这里串行跑目标、
             // 每个目标内部由仓库并发。目标之间不并发是刻意的：它们共用同一个 file provider，
             // 并发写 provider 文件会互相覆盖，healthcheck 拨到的是另一批节点。
             val sets = LinkedHashMap<String, Set<Int>>(RADAR_SERVICES.size)
@@ -322,34 +387,41 @@ class RadarViewModel(
                     .map { it.index }
                     .toSet()
             }
-            passSets = sets
+
+            // 「全部通过」= 每个服务都拨通的节点。逐个服务求交，别写成
+            // `sets.values.all { i in it }` 之外的花样 —— 一个服务都没答上来时交集必须为空，
+            // 否则会把「没测」显示成「全通」
+            val allPass: Set<Int> = result.nodes.indices
+                .filterTo(HashSet()) { i -> sets.values.all { i in it } }
+            passSets = sets + (RADAR_TARGET_ALL to allPass)
 
             // 「可用」= 至少能连上一个目标。要求全通会把大部分能用的节点算成不可用，
             // 而这批订阅里 vless 居多，各家的可达性本来就参差。
             val usable = result.nodes.indices.count { i -> sets.values.any { i in it } }
 
+            val targets = buildList {
+                add(RadarTarget(RADAR_TARGET_ALL, context.getString(R.string.radar_target_all), allPass.size))
+                RADAR_SERVICES.forEach { add(RadarTarget(it.key, it.name, sets[it.key]?.size ?: 0)) }
+            }
+
             update {
                 it.copy(
                     phase = RadarPhase.Done,
                     stageDone = RadarStage.entries.size,
-                    fetched = result.fetched,
-                    deduped = result.deduped,
                     usable = usable,
-                    failedSources = result.failures.size,
                     testUnavailable = !kernelAnswered,
-                    targets = RADAR_SERVICES
-                        .map { RadarTarget(it.key, it.name, sets[it.key]?.size ?: 0) }
-                        .toPersistentList(),
+                    targets = targets.toPersistentList(),
                 )
             }
         }
     }
 
-    /** 重置：清空结果回到未扫描。 */
+    /** 重置：清空结果回到未扫描。暂停态点取消也走这里。 */
     fun reset() {
         scanJob?.cancel()
         scannedNodes = emptyList()
         passSets = emptyMap()
+        fetchResult = null
         update { state ->
             state.copy(
                 phase = RadarPhase.Idle,
@@ -360,6 +432,7 @@ class RadarViewModel(
                 targets = persistentListOf(),
                 selectedTarget = null,
                 failedSources = 0,
+                pausedSources = 0,
                 testUnavailable = false,
             )
         }
@@ -374,16 +447,37 @@ class RadarViewModel(
     fun takeSelectedTarget(): RadarTarget? = _uiState.value.targets
         .firstOrNull { it.key == _uiState.value.selectedTarget }
 
+// === 导出 ===
+
+    /** 选好目录后记住它：后续导出直接落这里，直到用户再改。 */
+    fun setExportDir(treeUri: String) {
+        exportDirUri = treeUri
+        storage.putString(StorageKeys.RADAR_EXPORT_TREE, treeUri)
+        update { it.copy(exportDirLabel = dirLabel(treeUri)) }
+    }
+
+    fun hasExportDir(): Boolean = exportDirUri != null
+
     /**
-     * 渲染选中目标对应的节点。没有选中、该目标一个都没通、或还没扫出节点时返回 null。
+     * 把选中目标里通过的节点渲染成 v2rayN 订阅，写进已选目录下的一个新文件。
+     *
+     * 返回 false 的三种情况都不抛异常：没有选中目标、该目标一条都没通、写盘失败。
+     * 屏幕只需要知道成没成 —— 授权失效 / 磁盘满对用户没有可操作性。
      *
      * 只导出通过的节点是这个功能的意义所在：把 4000 条原始节点丢给用户等于没筛。
      */
-    fun exportSelected(format: RadarExportTarget): String? {
-        val target = takeSelectedTarget() ?: return null
-        val indexes = passSets[target.key] ?: return null
+    suspend fun exportSelected(): Boolean {
+        val target = takeSelectedTarget() ?: return false
+        val dir = exportDirUri ?: return false
+        val indexes = passSets[target.key] ?: return false
         val picked = scannedNodes.filterIndexed { i, _ -> i in indexes }
-        if (picked.isEmpty()) return null
-        return repository.render(picked, format)
+        if (picked.isEmpty()) return false
+        val text = repository.render(picked, RadarExportTarget.V2rayN)
+        return repository.writeExport(dir, "radar-${target.key}.txt", text)
     }
+
+    /** 从 tree uri 取出便于显示的目录名；解析不出来就原样显示 */
+    private fun dirLabel(uri: String): String = runCatching {
+        DocumentsContract.getTreeDocumentId(Uri.parse(uri)).substringAfterLast(':').ifEmpty { uri }
+    }.getOrDefault(uri)
 }

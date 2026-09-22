@@ -1,5 +1,8 @@
 package top.yukonga.mishka.ui.screen.radar
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -21,19 +24,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import top.yukonga.mishka.R
 import top.yukonga.mishka.ui.component.AdaptiveTopAppBar
 import top.yukonga.mishka.ui.component.blur.BlurredBar
@@ -60,6 +70,7 @@ import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 private val CardRadius = 16.dp
 private val ItemGap = 12.dp
@@ -74,10 +85,50 @@ fun RadarScreen(
     viewModel: RadarViewModel,
     bottomPadding: Dp = 0.dp,
     onAddSource: () -> Unit = {},
-    onExport: (RadarTarget) -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollBehavior = MiuixScrollBehavior()
+
+    // 暂停提示只弹一次：关掉之后靠底部按钮「继续执行」，否则每次重组都会重新弹
+    var pauseAcknowledged by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.phase) {
+        if (uiState.phase != RadarPhase.Paused) pauseAcknowledged = false
+    }
+
+    // 导出目录：第一次点导出时弹 SAF 目录选择器，选完记住；之后直接落那里，随时可改。
+    // 用 rememberLauncherForActivityResult 就地注册，不走 FilePicker 那套从 Activity 逐层透传。
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingExport by remember { mutableStateOf(false) }
+
+    val runExport: () -> Unit = {
+        scope.launch {
+            // 失败（授权失效 / 磁盘满）时保留选中，用户可以直接再点一次
+            if (viewModel.exportSelected()) viewModel.clearSelection()
+        }
+    }
+
+    val treeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri == null) {
+            // 用户取消：只清掉待办，不动选中态
+            pendingExport = false
+        } else {
+            // 持久授权必须与选择器在同一个回调里拿，否则重启后这个 tree uri 就失效了
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.setExportDir(uri.toString())
+            if (pendingExport) {
+                pendingExport = false
+                runExport()
+            }
+        }
+    }
 
     val backdrop = rememberBlurBackdrop()
     val blurActive = backdrop != null
@@ -131,22 +182,75 @@ fun RadarScreen(
                     }
                 }
             }
+            // 导出目录行只在扫描完成后露出，未扫描时不占位置
+            if (uiState.phase == RadarPhase.Done) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = ItemGap)
+                        .padding(bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = uiState.exportDirLabel
+                            ?.let { stringResource(R.string.radar_export_dir_set, it) }
+                            ?: stringResource(R.string.radar_export_dir_none),
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        text = stringResource(R.string.radar_export_change),
+                        onClick = { treeLauncher.launch(null) },
+                    )
+                }
+            }
             RadarActionButton(
                 uiState = uiState,
                 onScan = viewModel::startScan,
+                onContinue = viewModel::continueScan,
                 onReset = viewModel::reset,
                 onExport = {
-                    viewModel.takeSelectedTarget()?.let(onExport)
-                    // 导出完成后取消选中 → 按钮回到「重置」；导出失败时不会走到这里
-                    viewModel.clearSelection()
+                    if (viewModel.hasExportDir()) {
+                        runExport()
+                    } else {
+                        // 还没选过目录：先弹选择器，选完在回调里接着导出
+                        pendingExport = true
+                        treeLauncher.launch(null)
+                    }
                 },
             )
             Spacer(Modifier.height(bottomPadding))
         }
     }
+
+    // 抓取完、解析前的停靠点：拨测要被测节点自己出网，而 Android 同时只允许一个 VPN 生效，
+    // 用户得手动关掉别的 VPN。只弹一次，关掉后靠底部按钮「继续执行」。
+    if (uiState.phase == RadarPhase.Paused && !pauseAcknowledged) {
+        WindowDialog(
+            show = true,
+            title = stringResource(R.string.radar_pause_title),
+            summary = stringResource(R.string.radar_pause_message, uiState.pausedSources),
+            onDismissRequest = { pauseAcknowledged = true },
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                TextButton(
+                    text = stringResource(R.string.radar_pause_confirm),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    onClick = { pauseAcknowledged = true },
+                )
+                TextButton(
+                    text = stringResource(R.string.common_cancel),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { viewModel.reset() },
+                )
+            }
+        }
+    }
 }
 
-/** 顶部大卡：未扫描 / 扫描中（流水线）/ 已完成 三种形态。 */
+/** 顶部大卡：未扫描 / 抓取暂停 / 扫描中（流水线）/ 已完成 四种形态。 */
 @Composable
 private fun RadarHeaderCard(uiState: RadarUiState) {
     Column(
@@ -175,6 +279,21 @@ private fun RadarHeaderCard(uiState: RadarUiState) {
             }
 
             RadarPhase.Scanning -> RadarStageList(doneCount = uiState.stageDone)
+
+            RadarPhase.Paused -> {
+                StateIcon(ok = false)
+                Text(
+                    text = stringResource(R.string.radar_pause_title),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.radar_pause_message, uiState.pausedSources),
+                    fontSize = 12.5.sp,
+                    color = StatusColors.warning,
+                    modifier = Modifier.padding(top = 7.dp),
+                )
+            }
 
             RadarPhase.Done -> {
                 // 拨测没跑起来时不能给绿勾：这一轮其实只做完了去重，目标行的 0 是「没测」
@@ -434,7 +553,7 @@ private fun RadarTargetCard(
                 selected = selected,
                 value = when (uiState.phase) {
                     RadarPhase.Idle -> null
-                    RadarPhase.Scanning -> "…"
+                    RadarPhase.Scanning, RadarPhase.Paused -> "…"
                     RadarPhase.Done -> target.passed.toString()
                 },
                 clickable = uiState.canPickTarget,
@@ -463,22 +582,7 @@ private fun RadarTargetRow(
             .padding(horizontal = 18.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .squircleBackground(
-                    if (selected) Color.White.copy(alpha = 0.94f) else MiuixTheme.colorScheme.surface,
-                    10.dp,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = target.name.take(1),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (selected) StatusColors.healthy else MiuixTheme.colorScheme.onSurfaceContainerVariant,
-            )
-        }
+        RadarServiceLogo(key = target.key, selected = selected)
         Text(
             text = target.name,
             fontSize = 15.sp,
@@ -507,20 +611,24 @@ private fun RadarTargetRow(
 }
 
 /**
- * 底部固定操作条。文案由两个量共同决定：
- * 未扫描 → 开始扫描；扫描中 → 扫描中…（禁用）；已完成 → 重置；已完成且选中 → 导出 xxx。
+ * 底部固定操作条。文案由 phase + 选中目标共同决定：
+ * 未扫描 → 开始扫描；抓取暂停 → 继续执行；扫描中 → 扫描中…（禁用）；
+ * 已完成 → 重置；已完成且选中 → 导出 xxx。
  */
 @Composable
 private fun RadarActionButton(
     uiState: RadarUiState,
     onScan: () -> Unit,
+    onContinue: () -> Unit,
     onReset: () -> Unit,
     onExport: () -> Unit,
 ) {
     val selected = uiState.targets.firstOrNull { it.key == uiState.selectedTarget }
     val scanning = uiState.phase == RadarPhase.Scanning
+    val paused = uiState.phase == RadarPhase.Paused
     val label = when {
         scanning -> stringResource(R.string.radar_action_scanning)
+        paused -> stringResource(R.string.radar_action_continue)
         selected != null -> stringResource(R.string.radar_action_export, selected.name)
         uiState.phase == RadarPhase.Done -> stringResource(R.string.radar_action_reset)
         else -> stringResource(R.string.radar_action_scan)
@@ -530,6 +638,7 @@ private fun RadarActionButton(
         onClick = {
             when {
                 scanning -> Unit
+                paused -> onContinue()
                 selected != null -> onExport()
                 uiState.phase == RadarPhase.Done -> onReset()
                 else -> onScan()

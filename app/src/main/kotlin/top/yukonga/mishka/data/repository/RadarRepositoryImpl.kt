@@ -1,5 +1,8 @@
 package top.yukonga.mishka.data.repository
 
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.ProxyBuilder
 import io.ktor.client.plugins.HttpTimeout
@@ -20,17 +23,20 @@ import top.yukonga.mishka.data.radar.RadarExtractor
 import top.yukonga.mishka.data.radar.ShareLinkCodec
 import top.yukonga.mishka.data.radar.SubscriptionRenderer
 import top.yukonga.mishka.domain.model.RadarExportTarget
+import top.yukonga.mishka.domain.model.RadarFetchResult
 import top.yukonga.mishka.domain.model.RadarNode
 import top.yukonga.mishka.domain.model.RadarScanResult
+import top.yukonga.mishka.domain.model.RadarSourceBody
 import top.yukonga.mishka.domain.model.RadarSourceFailure
 import top.yukonga.mishka.domain.model.RadarSourceInput
 import top.yukonga.mishka.domain.model.RadarTestResult
 import top.yukonga.mishka.domain.repository.RadarRepository
 import top.yukonga.mishka.platform.ProxyServiceBridge
 import top.yukonga.mishka.platform.ProxyState
+import top.yukonga.mishka.service.ConfigGenerator
+import top.yukonga.mishka.service.MihomoRunner
 import top.yukonga.mishka.service.RuntimeOverrideBuilder
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 雷达主流程。
@@ -38,91 +44,99 @@ import java.util.concurrent.atomic.AtomicInteger
  * 抓取走 [SubscriptionProxyResolver]（与订阅下载同一条路）：Mishka 自身流量永远绕过 TUN，
  * 直连 GitHub raw 之类的境外资源极慢，必须让请求经过本机 mixed-port。
  *
+ * **抓取与解析分开**：抓取要一个能翻墙的出口，拨测要一个干净出口，两段需求互相矛盾，
+ * 中间必须留给用户切换网络的机会，所以正文先落成 [RadarFetchResult] 再交给 [parse]。
+ *
  * 单个源失败不中断整轮 —— 一个挂掉的源不该让另外十九个白抓。取消照常向上传播。
  */
 class RadarRepositoryImpl(
+    private val context: Context,
     private val proxyResolver: SubscriptionProxyResolver,
     private val providerFile: File,
 ) : RadarRepository {
 
-    private data class SourceOutcome(
-        val nodes: List<RadarNode>,
+    private data class FetchOutcome(
+        val body: RadarSourceBody?,
         val failure: RadarSourceFailure?,
     )
 
-    override suspend fun scan(
-        sources: List<RadarSourceInput>,
-        onFetched: (Int) -> Unit,
-        onDeduped: (Int) -> Unit,
-    ): RadarScanResult = withContext(Dispatchers.IO) {
-        val active = sources.filter { it.url.isNotBlank() }
-        if (active.isEmpty()) return@withContext RadarScanResult()
+    /** 自己拉起来的内核：endpoint + secret 建 API 客户端，runner 负责测完收尸 */
+    private class KernelHandle(
+        val runner: MihomoRunner,
+        val endpoint: String,
+        val secret: String,
+    )
 
-        val client = buildClient(proxyResolver.resolve(requireUserToggle = true))
-        // 累计的是「已抽出的节点数」而不是「已完成的源数」——进度条上的 fetched 是前者
-        val nodeCount = AtomicInteger(0)
+    // === 抓取 ===
 
-        val outcomes: List<SourceOutcome> = try {
-            val gate = Semaphore(FETCH_CONCURRENCY)
-            coroutineScope {
-                active.map { src ->
-                    async {
-                        val outcome = gate.withPermit { fetchOne(client, src) }
-                        onFetched(nodeCount.addAndGet(outcome.nodes.size))
-                        outcome
-                    }
-                }.awaitAll()
+    override suspend fun fetch(sources: List<RadarSourceInput>): RadarFetchResult =
+        withContext(Dispatchers.IO) {
+            val active = sources.filter { it.url.isNotBlank() }
+            if (active.isEmpty()) return@withContext RadarFetchResult()
+
+            val client = buildClient(proxyResolver.resolve(requireUserToggle = true))
+            val outcomes: List<FetchOutcome> = try {
+                val gate = Semaphore(FETCH_CONCURRENCY)
+                coroutineScope {
+                    active.map { src ->
+                        async { gate.withPermit { fetchOne(client, src) } }
+                    }.awaitAll()
+                }
+            } finally {
+                client.close()
             }
-        } finally {
-            client.close()
+
+            RadarFetchResult(
+                bodies = outcomes.mapNotNull { it.body },
+                failures = outcomes.mapNotNull { it.failure },
+            )
         }
 
+    private suspend fun fetchOne(client: HttpClient, src: RadarSourceInput): FetchOutcome {
+        val text = try {
+            client.get(src.url).bodyAsText()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            return FetchOutcome(null, RadarSourceFailure(src.id, src.name, e.message ?: "fetch failed"))
+        }
+        return FetchOutcome(RadarSourceBody(src.id, text), null)
+    }
+
+    // === 解析 + 去重（纯本地，不碰网络） ===
+
+    override fun parse(fetched: RadarFetchResult): RadarScanResult {
         val all = ArrayList<RadarNode>()
-        val failures = ArrayList<RadarSourceFailure>()
-        for (o in outcomes) {
-            all.addAll(o.nodes)
-            o.failure?.let(failures::add)
+        for (body in fetched.bodies) {
+            val ext = RadarExtractor.extract(body.body)
+            val nodes = ArrayList<RadarNode>()
+
+            // 结构化节点（Clash / JSON）与兜底扫出来的分享链一起进统一模型，重复交给去重处理
+            for (obj in ext.nodes) {
+                ShareLinkCodec.fromClash(obj)?.let(nodes::add)
+            }
+            nodes.addAll(ShareLinkCodec.parseAll(ext.links).nodes)
+
+            // origin 是 sourceCount 的唯一来源，漏了这一步跨源重复就永远是 0
+            all.addAll(nodes.map { it.copy(origin = body.sourceId) })
         }
 
         val deduped = RadarDedupe.dedupe(all)
         val summary = RadarDedupe.summarize(deduped)
-        onDeduped(summary.unique)
 
         // 往返自检只抽前 500 条：它是解析器的体检，不是全量校验，抽样的信号足够
         val roundTrip = ShareLinkCodec.roundTrip(deduped.unique.take(500))
 
-        RadarScanResult(
+        return RadarScanResult(
             fetched = all.size,
             l0Dropped = summary.l0Dropped,
             deduped = summary.unique,
             multiSource = summary.multiSource,
             serverCount = summary.serverCount,
             nodes = deduped.unique,
-            failures = failures,
+            failures = fetched.failures,
             roundTripFailed = roundTrip.failed.size,
         )
-    }
-
-    private suspend fun fetchOne(client: HttpClient, src: RadarSourceInput): SourceOutcome {
-        val text = try {
-            client.get(src.url).bodyAsText()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            return SourceOutcome(emptyList(), RadarSourceFailure(src.id, src.name, e.message ?: "fetch failed"))
-        }
-
-        val ext = RadarExtractor.extract(text)
-        val nodes = ArrayList<RadarNode>()
-
-        // 结构化节点（Clash / JSON）与兜底扫出来的分享链一起进统一模型，重复交给去重处理
-        for (obj in ext.nodes) {
-            ShareLinkCodec.fromClash(obj)?.let(nodes::add)
-        }
-        nodes.addAll(ShareLinkCodec.parseAll(ext.links).nodes)
-
-        // origin 是 sourceCount 的唯一来源，漏了这一步跨源重复就永远是 0
-        return SourceOutcome(nodes.map { it.copy(origin = src.id) }, null)
     }
 
     override fun render(nodes: List<RadarNode>, target: RadarExportTarget): String = when (target) {
@@ -132,68 +146,172 @@ class RadarRepositoryImpl(
     }
 
     /**
-     * 实测节点可用性：把 [nodes] 写进配置里已声明的 `proxy-providers.radar`，热加载后逐节点拨测。
-     *
-     * 走 file provider 而不是 `PUT /configs`：embed mode 禁掉了配置热重载，重启内核又会断掉
-     * 用户当前的连接，provider 是唯一不打扰用户的注入通道。
-     *
-     * 批量端点 `/{provider}/healthcheck` 不收 url 参数（用的永远是 provider 声明里那个 url），
-     * 要按服务分别测就只能走单节点端点 `/{provider}/{name}/healthcheck?url=`，所以这里是 N 次调用。
-     *
-     * 代理没跑、provider 未声明、文件写不进去 —— 一律返回空表让 UI 自己提示；不抛异常，
-     * 也不编造「0 个可用」这种看着像有结论的数字。
+     * 写进 SAF 目录。用 DocumentsContract 而不是 DocumentFile：后者要额外引
+     * androidx.documentfile，而这里只需要「在 tree 下新建一个文档」这两步。
      */
+    override suspend fun writeExport(treeUri: String, fileName: String, content: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val tree = Uri.parse(treeUri)
+                val parent = DocumentsContract.buildDocumentUriUsingTree(
+                    tree,
+                    DocumentsContract.getTreeDocumentId(tree),
+                )
+                val target = DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parent,
+                    EXPORT_MIME,
+                    fileName,
+                ) ?: return@withContext false
+                // "wt" 截断写：同名文档被 provider 复用时，不清空会把旧内容留在尾部
+                context.contentResolver.openOutputStream(target, "wt")?.use { out ->
+                    out.write(content.toByteArray(Charsets.UTF_8))
+                } ?: return@withContext false
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                false
+            }
+        }
+
+    // === 拨测 ===
+
     override suspend fun test(nodes: List<RadarNode>, serviceUrl: String): List<RadarTestResult> =
         withContext(Dispatchers.IO) {
             if (nodes.isEmpty()) return@withContext emptyList()
 
-            val status = ProxyServiceBridge.state.value
-            if (status.state != ProxyState.Running) return@withContext emptyList()
+            val running = ProxyServiceBridge.state.value
+            if (running.state == ProxyState.Running) {
+                // 日常代理在跑：借它的内核，不另起进程
+                return@withContext testOnKernel(nodes, serviceUrl, running.externalController, running.secret)
+            }
 
-            val api = MihomoApiClient(
-                baseUrl = "http://${status.externalController}",
-                secret = status.secret,
-            )
-
+            // 日常代理没跑：自己拉一个纯内核。**不能直接返回空表** —— 那等于要求用户先开代理
+            // 才能测，而代理能不能起来恰恰取决于这批节点通不通，是个死锁。
+            val kernel = startKernel() ?: return@withContext emptyList()
             try {
-                // 名字必须与写进文件时一致，否则 healthcheck 按名字找不到节点，全部 404
-                val names = SubscriptionRenderer.uniqueNames(nodes)
-
-                providerFile.parentFile?.mkdirs()
-                providerFile.writeText(SubscriptionRenderer.clashProvider(nodes), Charsets.UTF_8)
-                api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
-
-                val gate = Semaphore(TEST_CONCURRENCY)
-                coroutineScope {
-                    nodes.mapIndexed { i, n ->
-                        async {
-                            gate.withPermit {
-                                val delay = try {
-                                    api.getProviderProxyDelay(
-                                        provider = RuntimeOverrideBuilder.RADAR_PROVIDER_NAME,
-                                        name = names[i],
-                                        testUrl = serviceUrl,
-                                        timeout = TEST_TIMEOUT_MS,
-                                    ).delay
-                                } catch (e: CancellationException) {
-                                    throw e
-                                } catch (e: Throwable) {
-                                    // 单节点拨不通不算整体失败，标记后继续下一个
-                                    NO_DELAY
-                                }
-                                RadarTestResult(i, n.server, n.port, n.name, delay)
-                            }
-                        }
-                    }.awaitAll()
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                emptyList()
+                testOnKernel(nodes, serviceUrl, kernel.endpoint, kernel.secret)
             } finally {
-                api.close()
+                kernel.runner.stop()
             }
         }
+
+    /**
+     * 把节点写进 provider 文件后逐个 healthcheck。
+     *
+     * 批量端点 `/{provider}/healthcheck` 不收 url 参数（用的永远是 provider 声明里那个 url），
+     * 要按服务分别测（Google / YouTube / …）就只能走单节点端点，所以这里是 N 次调用。
+     */
+    private suspend fun testOnKernel(
+        nodes: List<RadarNode>,
+        serviceUrl: String,
+        endpoint: String,
+        secret: String,
+    ): List<RadarTestResult> {
+        val api = MihomoApiClient(baseUrl = "http://$endpoint", secret = secret)
+        return try {
+            // 名字必须与写进文件时一致，否则 healthcheck 按名字找不到节点，全部 404
+            val names = SubscriptionRenderer.uniqueNames(nodes)
+
+            providerFile.parentFile?.mkdirs()
+            providerFile.writeText(SubscriptionRenderer.clashProvider(nodes), Charsets.UTF_8)
+            api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
+
+            val gate = Semaphore(TEST_CONCURRENCY)
+            coroutineScope {
+                nodes.mapIndexed { i, n ->
+                    async {
+                        gate.withPermit {
+                            val delay = try {
+                                api.getProviderProxyDelay(
+                                    provider = RuntimeOverrideBuilder.RADAR_PROVIDER_NAME,
+                                    name = names[i],
+                                    testUrl = serviceUrl,
+                                    timeout = TEST_TIMEOUT_MS,
+                                ).delay
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                // 单节点拨不通不算整体失败，标记后继续下一个
+                                NO_DELAY
+                            }
+                            RadarTestResult(i, n.server, n.port, n.name, delay)
+                        }
+                    }
+                }.awaitAll()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            emptyList()
+        } finally {
+            api.close()
+        }
+    }
+
+    /**
+     * 拉起一个只提供 API 的 mihomo 进程（`tun.enable=false`）。
+     *
+     * **不走 [MishkaTunService]**：那是个 VpnService，而 Android 同时只允许一个 VPN 生效，
+     * 用户挂着别的 VPN 时它根本起不来。测速也不需要 TUN —— mihomo 拨节点走自己的 outbound，
+     * 跟有没有 TUN 无关，所以这里直接 fork 一个裸内核。
+     */
+    private suspend fun startKernel(): KernelHandle? {
+        val workDir = ConfigGenerator.getWorkDir(context)
+        workDir.mkdirs()
+
+        // provider 文件必须先存在：mihomo 在 Parse 阶段就读它，缺失会让整个配置解析失败，
+        // 现象是「内核起不来」，而不是「provider 是空的」
+        providerFile.parentFile?.mkdirs()
+        if (!providerFile.isFile) {
+            providerFile.writeText(EMPTY_PROVIDER, Charsets.UTF_8)
+        }
+
+        File(workDir, KERNEL_CONFIG_NAME).writeText(KERNEL_CONFIG_BODY, Charsets.UTF_8)
+
+        val overrideFile = File(workDir, KERNEL_OVERRIDE_NAME)
+        overrideFile.writeText(kernelOverride(providerFile.absolutePath), Charsets.UTF_8)
+
+        val secret = ConfigGenerator.generateSecret()
+        val endpoint = "127.0.0.1:$KERNEL_PORT"
+        val runner = MihomoRunner(context)
+
+        val started = runner.start(
+            subscriptionId = null,
+            useRoot = false,
+            overrideJsonPath = overrideFile.absolutePath,
+            secret = secret,
+            externalController = endpoint,
+        )
+        return if (started) KernelHandle(runner, endpoint, secret) else null
+    }
+
+    /**
+     * 雷达专用 override。刻意不复用 [RuntimeOverrideBuilder.buildAndWriteForRun]：那个入口会
+     * 带上用户订阅的 TUN / 分应用 / mixed-port 设置，而测速只要「有 API + 有 radar provider」。
+     */
+    private fun kernelOverride(providerPath: String): String = """
+        {
+          "proxy-providers": {
+            "${RuntimeOverrideBuilder.RADAR_PROVIDER_NAME}": {
+              "type": "file",
+              "path": "${jsonEscape(providerPath)}",
+              "health-check": {
+                "enable": true,
+                "url": "$KERNEL_HEALTHCHECK_URL",
+                "interval": $KERNEL_HEALTHCHECK_INTERVAL
+              }
+            }
+          },
+          "tun": { "enable": false },
+          "mode": "direct",
+          "log-level": "warning"
+        }
+    """.trimIndent()
+
+    private fun jsonEscape(value: String): String =
+        value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun buildClient(proxyUrl: String?): HttpClient = HttpClient {
         install(HttpTimeout) {
@@ -219,5 +337,28 @@ class RadarRepositoryImpl(
 
         /** 拨不通时的哨兵值，与 [RadarTestResult.delayMs] 的约定一致 */
         private const val NO_DELAY = -1
+
+        /** 避开 9090：日常代理可能正占着它 */
+        private const val KERNEL_PORT = 9099
+        private const val KERNEL_CONFIG_NAME = "config.yaml"
+        private const val KERNEL_OVERRIDE_NAME = "override.radar.json"
+        private const val KERNEL_HEALTHCHECK_URL = "http://www.gstatic.com/generate_204"
+        private const val KERNEL_HEALTHCHECK_INTERVAL = 300
+
+        /** 空 provider 的最小合法内容。文件缺失会让 mihomo 在 Parse 阶段直接失败 */
+        private const val EMPTY_PROVIDER = "proxies: []"
+
+        /** SAF 新建文档用的 MIME。订阅文本是纯文本，text/plain 兼容性最好 */
+        private const val EXPORT_MIME = "text/plain"
+
+        /** 测速内核的最小配置：不引用任何订阅，只求把 API 拉起来 */
+        private val KERNEL_CONFIG_BODY = """
+mode: direct
+log-level: warning
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT
+""".trimIndent()
     }
 }

@@ -18,6 +18,29 @@ data class RadarSourceFailure(
     val reason: String = "",
 )
 
+/** 一个源下回来的正文。[sourceId] 决定去重时 sourceCount 归属到哪个源，不能丢 */
+@Serializable
+data class RadarSourceBody(
+    val sourceId: String = "",
+    val body: String = "",
+)
+
+/**
+ * 抓取阶段的产出：各源正文 + 失败列表。
+ *
+ * 抓取与解析之间要能断开：抓取要一个能翻墙的出口（源多半在 GitHub raw），拨测要一个干净
+ * 出口（被别的 VPN 劫持时测出来的不是节点本身的可达性）。这两段的需求互相矛盾，中间必须
+ * 留给用户切换网络的机会，所以正文先落在这里，等切好网再交给解析。
+ */
+@Serializable
+data class RadarFetchResult(
+    val bodies: List<RadarSourceBody> = emptyList(),
+    val failures: List<RadarSourceFailure> = emptyList(),
+) {
+    /** 实际下回来的源数，暂停态提示用 */
+    val fetchedSources: Int get() = bodies.size
+}
+
 /** 导出目标格式 */
 @Serializable
 enum class RadarExportTarget { V2rayN, Clash, SingBox }
