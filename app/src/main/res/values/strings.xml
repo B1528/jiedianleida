@@ -103,6 +103,14 @@
     <string name="radar_action_export">Export %1$s</string>
     <string name="radar_test_unavailable">Proxy is not running, so the nodes were not tested</string>
     <string name="radar_sources_failed">%1$d sources failed to load</string>
+    <string name="radar_action_continue">Continue</string>
+    <string name="radar_target_all">Passing all</string>
+    <string name="radar_export_dir_none">Choose export folder</string>
+    <string name="radar_export_dir_set">Export to %1$s</string>
+    <string name="radar_export_change">Change</string>
+    <string name="radar_pause_title">Fetch complete</string>
+    <string name="radar_pause_message">%1$d sources downloaded. Turn off any other VPN first, or the results will be skewed by its exit.</string>
+    <string name="radar_pause_confirm">Other VPN is off</string>
     <string name="radar_source_add_title">Add source</string>
     <string name="radar_source_edit_title">Edit source</string>
     <string name="radar_source_name">Name</string>

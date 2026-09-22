@@ -101,6 +101,14 @@
     <string name="radar_action_export">导出 %1$s</string>
     <string name="radar_test_unavailable">代理未运行，没有做连通性测试</string>
     <string name="radar_sources_failed">有 %1$d 个源抓取失败</string>
+    <string name="radar_action_continue">继续执行</string>
+    <string name="radar_target_all">全部通过</string>
+    <string name="radar_export_dir_none">选择导出目录</string>
+    <string name="radar_export_dir_set">导出到 %1$s</string>
+    <string name="radar_export_change">更改</string>
+    <string name="radar_pause_title">抓取完成</string>
+    <string name="radar_pause_message">已下载 %1$d 个源。请先关掉其他 VPN 再继续，否则测出来的结果会受它的出口影响。</string>
+    <string name="radar_pause_confirm">已关闭</string>
     <string name="radar_source_add_title">添加节点源</string>
     <string name="radar_source_edit_title">编辑节点源</string>
     <string name="radar_source_name">名称</string>

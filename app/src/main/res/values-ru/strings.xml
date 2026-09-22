@@ -101,6 +101,14 @@
     <string name="radar_action_export">Экспорт %1$s</string>
     <string name="radar_test_unavailable">Прокси не запущен, узлы не проверены</string>
     <string name="radar_sources_failed">Не удалось загрузить источников: %1$d</string>
+    <string name="radar_action_continue">Продолжить</string>
+    <string name="radar_target_all">Прошли все</string>
+    <string name="radar_export_dir_none">Выбрать папку экспорта</string>
+    <string name="radar_export_dir_set">Экспорт в %1$s</string>
+    <string name="radar_export_change">Изменить</string>
+    <string name="radar_pause_title">Загрузка завершена</string>
+    <string name="radar_pause_message">Загружено источников: %1$d. Сначала отключите другие VPN, иначе результаты будут искажены их выходом.</string>
+    <string name="radar_pause_confirm">Другой VPN отключён</string>
     <string name="radar_source_add_title">Добавить источник</string>
     <string name="radar_source_edit_title">Изменить источник</string>
     <string name="radar_source_name">Название</string>

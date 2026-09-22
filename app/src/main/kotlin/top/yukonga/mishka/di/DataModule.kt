@@ -50,6 +50,7 @@ val dataModule = module {
     // provider 文件路径必须与配置里声明的 proxy-providers.radar 一致，否则热加载拿 404
     single<RadarRepository> {
         RadarRepositoryImpl(
+            context = androidContext(),
             proxyResolver = get(),
             providerFile = RuntimeOverrideBuilder.radarProviderFile(androidContext()),
         )

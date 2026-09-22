@@ -118,6 +118,9 @@ object StorageKeys {
 
     // 雷达的节点源列表（JSON 数组字符串）。用户不删就一直留着，重启不掉
     const val RADAR_SOURCES = "radar_sources"
+
+    /** 上次选的 SAF 导出目录（tree uri 字符串）。空串表示还没选过 */
+    const val RADAR_EXPORT_TREE = "radar_export_tree"
 }
 
 class PlatformStorage(context: Context) {

@@ -42,7 +42,7 @@ val viewModelModule = module {
         )
     }
     single { AppProxyViewModel(get(), get(), get()) }
-    single { RadarViewModel(get(), get()) }
+    single { RadarViewModel(get(), get(), androidContext()) }
     single { NetworkSettingsViewModel(get()) }
     single { MetaSettingsViewModel(get()) }
     single { ExternalControlViewModel(get()) }
