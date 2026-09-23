@@ -2,6 +2,7 @@ package top.yukonga.mishka.data.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
@@ -20,6 +21,7 @@ import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import okhttp3.Dispatcher
 import top.yukonga.mishka.domain.model.ConnectionsResponse
 import top.yukonga.mishka.domain.model.DelayResult
 import top.yukonga.mishka.domain.model.DnsQueryResponse
@@ -41,7 +43,20 @@ class MihomoApiClient(
         coerceInputValues = true
     }
 
-    private val client = HttpClient {
+    // 显式指定 OkHttp 并放开每主机并发：OkHttp 默认 maxRequestsPerHost = 5，会把雷达的
+    // 32 路拨测硬压成 5 路（7488 次健康检查从 20 分钟拖成 2 小时）。默认引擎本来就是
+    // OkHttp（代理配置块依赖它的 config），显式指定只是为了能配 dispatcher。
+    private val client = HttpClient(OkHttp) {
+        engine {
+            config {
+                dispatcher(
+                    Dispatcher().apply {
+                        maxRequests = 128
+                        maxRequestsPerHost = 64
+                    },
+                )
+            }
+        }
         install(ContentNegotiation) {
             json(json)
         }
