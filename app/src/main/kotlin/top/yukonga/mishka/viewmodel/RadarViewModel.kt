@@ -99,6 +99,9 @@ data class RadarUiState(
      * 拨测链路的诊断原文。雷达内核是独立进程（独立端口 + 独立 secret），它的日志不进主
      * 日志页，测速失败时这里是唯一能说明「卡在哪一环」的东西。空串表示还没跑过或读不到。
      */
+    /** 拨测进度：已完成目标数 / 目标总数。8 个目标跑完之前界面靠它显示「在动」 */
+    val testDone: Int = 0,
+    val testTotal: Int = 0,
     val diagText: String = "",
 ) {
     /** 只有扫描完成后才允许点选目标行。 */
@@ -302,6 +305,9 @@ class RadarViewModel(
                     pausedSources = 0,
                     parseFailed = 0,
                     testUnavailable = false,
+                    testDone = 0,
+                    testTotal = 0,
+                    diagText = "",
                 )
             }
             scannedNodes = emptyList()
@@ -380,15 +386,19 @@ class RadarViewModel(
             // 并发写 provider 文件会互相覆盖，healthcheck 拨到的是另一批节点。
             val sets = LinkedHashMap<String, Set<Int>>(RADAR_SERVICES.size)
             var kernelAnswered = false
-            for (service in RADAR_SERVICES) {
-                val results = try {
-                    repository.test(result.nodes, service.url)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    // 单个目标拨测整体失败不拖垮其余目标
-                    emptyList()
+            // 内核只起一次，8 个目标共用它（见 RadarRepository.test），顺带把进度报给界面
+            val allResults = try {
+                repository.test(result.nodes, RADAR_SERVICES.map { it.url }) { done, total ->
+                    update { it.copy(testDone = done, testTotal = total) }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // 整轮拨测失败不拖垮后面的统计
+                emptyList()
+            }
+            RADAR_SERVICES.forEachIndexed { idx, service ->
+                val results = allResults.getOrElse(idx) { emptyList() }
                 if (results.isNotEmpty()) kernelAnswered = true
                 sets[service.key] = results
                     .asSequence()
@@ -449,6 +459,8 @@ class RadarViewModel(
                 parseFailed = 0,
                 testUnavailable = false,
                 diagText = "",
+                testDone = 0,
+                testTotal = 0,
             )
         }
     }

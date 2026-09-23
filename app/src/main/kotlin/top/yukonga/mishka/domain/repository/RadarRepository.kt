@@ -26,13 +26,21 @@ interface RadarRepository {
     fun parse(fetched: RadarFetchResult): RadarScanResult
 
     /**
-     * 用 mihomo 实测这批节点能否真的访问 [serviceUrl]（真实协议握手 + HTTP 请求）。
+     * 用 mihomo 实测这批节点能否真的访问 [serviceUrls] 中的每一个（真实协议握手 + HTTP 请求）。
+     *
+     * **内核只拉一次测完所有目标**：冷启动要 fork+exec + 加载 56MB .so + 解析整份 provider，
+     * 每个目标重启一次是纯浪费；provider 校验又是整份原子的，自愈剔除也没必要重跑 N 遍。
+     * 返回列表与 [serviceUrls] 一一对应；[onProgress] 回调 (已完成目标数, 目标总数)。
      *
      * 实现自己负责把内核拉起来再关掉：日常代理没跑时不能直接返回空表，否则「测速」就
      * 退化成了「必须先开代理」——而代理能不能开起来恰恰取决于这批节点通不通，是个死锁。
      * 拉起的是**纯内核**（`tun.enable=false`），不占 VPN 位，能和别的 VPN 共存。
      */
-    suspend fun test(nodes: List<RadarNode>, serviceUrl: String): List<RadarTestResult>
+    suspend fun test(
+        nodes: List<RadarNode>,
+        serviceUrls: List<String>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): List<List<RadarTestResult>>
 
     /** 纯函数：把节点渲染成目标格式的文本 */
     fun render(nodes: List<RadarNode>, target: RadarExportTarget): String

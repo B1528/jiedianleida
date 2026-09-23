@@ -279,7 +279,22 @@ private fun RadarHeaderCard(uiState: RadarUiState) {
                 )
             }
 
-            RadarPhase.Scanning -> RadarStageList(doneCount = uiState.stageDone)
+            RadarPhase.Scanning -> {
+                RadarStageList(doneCount = uiState.stageDone)
+                // 拨测是整轮最慢的一段（8 个目标 × 上千节点），没有这行界面会几分钟一动不动
+                if (uiState.testTotal > 0) {
+                    Text(
+                        text = stringResource(
+                            R.string.radar_test_progress,
+                            uiState.testDone,
+                            uiState.testTotal,
+                        ),
+                        fontSize = 12.5.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+            }
 
             RadarPhase.Paused -> {
                 StateIcon(ok = false)

@@ -181,9 +181,15 @@ class RadarRepositoryImpl(
 
     // === 拨测 ===
 
-    override suspend fun test(nodes: List<RadarNode>, serviceUrl: String): List<RadarTestResult> =
+    override suspend fun test(
+        nodes: List<RadarNode>,
+        serviceUrls: List<String>,
+        onProgress: (Int, Int) -> Unit,
+    ): List<List<RadarTestResult>> =
         withContext(Dispatchers.IO) {
-            if (nodes.isEmpty()) return@withContext emptyList()
+            if (nodes.isEmpty() || serviceUrls.isEmpty()) {
+                return@withContext serviceUrls.map { emptyList() }
+            }
 
             // 一律起独立内核，哪怕日常代理正在跑。借它的内核会把上千个候选节点写进
             // 用户实时代理列表（provider 文件是持久化的，跑完还留着），而日常配置现在
@@ -193,10 +199,10 @@ class RadarRepositoryImpl(
             val kernel = startKernel()
             if (kernel == null) {
                 diag("startKernel failed")
-                return@withContext emptyList()
+                return@withContext serviceUrls.map { emptyList() }
             }
             try {
-                testOnKernel(nodes, serviceUrl, kernel.endpoint, kernel.secret)
+                testOnKernel(nodes, serviceUrls, kernel.endpoint, kernel.secret, onProgress)
             } finally {
                 kernel.runner.stop()
             }
@@ -210,10 +216,11 @@ class RadarRepositoryImpl(
      */
     private suspend fun testOnKernel(
         nodes: List<RadarNode>,
-        serviceUrl: String,
+        serviceUrls: List<String>,
         endpoint: String,
         secret: String,
-    ): List<RadarTestResult> {
+        onProgress: (Int, Int) -> Unit,
+    ): List<List<RadarTestResult>> {
         val api = MihomoApiClient(baseUrl = "http://$endpoint", secret = secret)
         return try {
             // mihomo 校验 provider 是**整份原子**的：任何一个节点不合法，PUT 直接 503，
@@ -253,9 +260,15 @@ class RadarRepositoryImpl(
             // 最终表现成「全部节点不可用」。这里回读一次，0 个节点直接作废整轮测试。
             val loaded = api.getProviders()
                 .providers[RuntimeOverrideBuilder.RADAR_PROVIDER_NAME]?.proxies?.size ?: 0
+            // 先把目标总数播给界面：否则第一个目标跑完前 testTotal 还是 0，进度行不渲染。
+            // 放在 loaded==0 判废之前，provider 整份被拒时界面也能看到「0 / N」而不是全程静止。
+            onProgress(0, serviceUrls.size)
             diag("provider loaded=$loaded")
+            // 0 个节点 = 这份 provider 被内核整份丢弃了，再测下去只会白等上万次 404
+            if (loaded == 0) return serviceUrls.map { emptyList() }
 
             val gate = Semaphore(TEST_CONCURRENCY)
+            serviceUrls.mapIndexed { svcIdx, serviceUrl ->
             val results = coroutineScope {
                 nodes.mapIndexed { i, n ->
                     async {
@@ -278,13 +291,15 @@ class RadarRepositoryImpl(
                     }
                 }.awaitAll()
             }
-            diag("tested=${results.size} passed=${results.count { it.delayMs > 0 }}")
+            diag("svc=$svcIdx tested=${results.size} passed=${results.count { it.delayMs > 0 }}")
+            onProgress(svcIdx + 1, serviceUrls.size)
             results
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             diag("testOnKernel threw: ${e.message}")
-            emptyList()
+            serviceUrls.map { emptyList() }
         } finally {
             api.close()
         }
@@ -370,7 +385,7 @@ class RadarRepositoryImpl(
         message?.let { Regex("""proxy (\d+) error""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
 
     /** 自愈剔除的上限：整份都坏时不能把循环拖成死循环 */
-    private val MAX_DROPPED_NODES = 20
+    private val MAX_DROPPED_NODES = 50
 
     private fun jsonEscape(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -395,7 +410,7 @@ class RadarRepositoryImpl(
 
         /** 拨测是真实协议握手，比抓取贵得多；32 路在真机上够快又不会把内核压垮 */
         private const val TEST_CONCURRENCY = 32
-        private const val TEST_TIMEOUT_MS = 5000
+        private const val TEST_TIMEOUT_MS = 3000
 
         /** 拨不通时的哨兵值，与 [RadarTestResult.delayMs] 的约定一致 */
         private const val NO_DELAY = -1
