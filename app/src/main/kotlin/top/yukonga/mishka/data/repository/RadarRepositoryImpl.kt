@@ -203,7 +203,7 @@ class RadarRepositoryImpl(
             val kernel = startKernel()
             if (kernel == null) {
                 diag("startKernel failed")
-                return@withContext serviceUrls.map { emptyList() }
+                return@withContext services.map { emptyList() }
             }
             try {
                 testOnKernel(nodes, services, kernel.endpoint, kernel.secret, onProgress)
@@ -298,7 +298,7 @@ class RadarRepositoryImpl(
             val gate = Semaphore(TEST_CONCURRENCY)
             val results = coroutineScope {
                 testIdx.map { i ->
-                    val n = nodes[i
+                    val n = nodes[i]
                     async {
                         gate.withPermit {
                             val delay = try {
