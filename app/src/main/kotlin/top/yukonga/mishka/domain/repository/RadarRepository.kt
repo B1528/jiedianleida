@@ -17,6 +17,9 @@ import top.yukonga.mishka.domain.model.RadarTestResult
  * **实现不得向调用方抛异常**：单个源抓取失败要落进 [RadarFetchResult.failures] 继续跑完
  * 其余源，一个挂掉的源不该让整轮扫描白费。取消（CancellationException）照常向上传播。
  */
+/** 一个拨测目标：探针地址 + 该站点的单次拨测超时（毫秒）。 */
+data class RadarProbe(val url: String, val timeoutMs: Int)
+
 interface RadarRepository {
 
     /** 只下载：把每个源的正文取回来，不做任何解析。 */
@@ -38,7 +41,7 @@ interface RadarRepository {
      */
     suspend fun test(
         nodes: List<RadarNode>,
-        serviceUrls: List<String>,
+        services: List<RadarProbe>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): List<List<RadarTestResult>>
 

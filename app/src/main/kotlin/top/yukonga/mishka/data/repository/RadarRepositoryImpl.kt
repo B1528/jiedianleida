@@ -30,11 +30,15 @@ import top.yukonga.mishka.domain.model.RadarSourceBody
 import top.yukonga.mishka.domain.model.RadarSourceFailure
 import top.yukonga.mishka.domain.model.RadarSourceInput
 import top.yukonga.mishka.domain.model.RadarTestResult
+import top.yukonga.mishka.domain.repository.RadarProbe
 import top.yukonga.mishka.domain.repository.RadarRepository
 import top.yukonga.mishka.service.ConfigGenerator
 import top.yukonga.mishka.service.MihomoRunner
 import top.yukonga.mishka.service.RuntimeOverrideBuilder
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 雷达主流程。
@@ -183,12 +187,12 @@ class RadarRepositoryImpl(
 
     override suspend fun test(
         nodes: List<RadarNode>,
-        serviceUrls: List<String>,
+        services: List<RadarProbe>,
         onProgress: (Int, Int) -> Unit,
     ): List<List<RadarTestResult>> =
         withContext(Dispatchers.IO) {
-            if (nodes.isEmpty() || serviceUrls.isEmpty()) {
-                return@withContext serviceUrls.map { emptyList() }
+            if (nodes.isEmpty() || services.isEmpty()) {
+                return@withContext services.map { emptyList() }
             }
 
             // 一律起独立内核，哪怕日常代理正在跑。借它的内核会把上千个候选节点写进
@@ -202,7 +206,7 @@ class RadarRepositoryImpl(
                 return@withContext serviceUrls.map { emptyList() }
             }
             try {
-                testOnKernel(nodes, serviceUrls, kernel.endpoint, kernel.secret, onProgress)
+                testOnKernel(nodes, services, kernel.endpoint, kernel.secret, onProgress)
             } finally {
                 kernel.runner.stop()
             }
@@ -216,7 +220,7 @@ class RadarRepositoryImpl(
      */
     private suspend fun testOnKernel(
         nodes: List<RadarNode>,
-        serviceUrls: List<String>,
+        services: List<RadarProbe>,
         endpoint: String,
         secret: String,
         onProgress: (Int, Int) -> Unit,
@@ -226,17 +230,35 @@ class RadarRepositoryImpl(
             // mihomo 校验 provider 是**整份原子**的：任何一个节点不合法，PUT 直接 503，
             // 整份一条都不加载。而它一次只报第一条，所以按报出的下标逐条剔除后重试，
             // 别让上千条里的一条坏节点把整轮测速废掉。
-            var alive = nodes.indices.toList()
+
+            // TCP 预筛：死节点不必进 provider，更不必为它付 8 次超时
+            // 预筛自身失败就退回全量——它只是优化，不该成为新的失败点
+            val reachable = runCatching { tcpReachable(nodes) }.getOrDefault(nodes.indices.toSet())
+            // 留存率低于 5% 说明是本机网络/内核的问题，不能信这一次，退回全量
+            val trustPrefilter = reachable.size >= nodes.size / 20
+            diag("prefilter kept=${reachable.size}/${nodes.size} trust=$trustPrefilter")
+            var alive = if (trustPrefilter) nodes.indices.filter { it in reachable } else nodes.indices.toList()
             var names: Map<Int, String> = emptyMap()
+            var testIdx: List<Int> = emptyList()
             var dropped = 0
+
             while (true) {
                 val list = alive.map { nodes[it] }
                 // 名字必须与写进文件时一致，否则 healthcheck 按名字找不到节点，全部 404
                 val unique = SubscriptionRenderer.uniqueNames(list)
                 names = alive.withIndex().associate { (j, orig) -> orig to unique[j] }
                 providerFile.parentFile?.mkdirs()
-                providerFile.writeText(SubscriptionRenderer.clashProvider(list), Charsets.UTF_8)
-                diag("nodes=${list.size} dropped=$dropped")
+                val yaml = SubscriptionRenderer.clashProvider(list)
+                providerFile.writeText(yaml, Charsets.UTF_8)
+                // 渲染器会静默跳过不支持的协议，「入参条数」和「写进文件的条数」可能差很多
+                // 渲染器会静默跳过不支持的协议，「入参条数」和「写进文件的条数」可能差很多
+                val writtenNames = yaml.lineSequence()
+                    .filter { it.startsWith("  - name: ") }
+                    .map { it.removePrefix("  - name: ").trim().trim('"', '\'') }
+                    .toHashSet()
+                diag("nodes=${list.size} written=${writtenNames.size} dropped=$dropped")
+                // 只测真正进了 provider 的节点：没写进去的 healthcheck 一律 404，白跑
+                testIdx = alive.filter { j -> (names[j] ?: nodes[j].name) in writtenNames }
                 try {
                     api.updateProvider(RuntimeOverrideBuilder.RADAR_PROVIDER_NAME)
                     diag("updateProvider ok")
@@ -262,23 +284,29 @@ class RadarRepositoryImpl(
                 .providers[RuntimeOverrideBuilder.RADAR_PROVIDER_NAME]?.proxies?.size ?: 0
             // 先把目标总数播给界面：否则第一个目标跑完前 testTotal 还是 0，进度行不渲染。
             // 放在 loaded==0 判废之前，provider 整份被拒时界面也能看到「0 / N」而不是全程静止。
-            onProgress(0, serviceUrls.size)
+            onProgress(0, services.size)
             diag("provider loaded=$loaded")
             // 0 个节点 = 这份 provider 被内核整份丢弃了，再测下去只会白等上万次 404
-            if (loaded == 0) return serviceUrls.map { emptyList() }
+            if (loaded == 0) return services.map { emptyList() }
 
+            val done = AtomicInteger(0)
+            coroutineScope {
+            services.mapIndexed { svcIdx, probe ->
+            async {
+            // 每站点一把独立信号量：共享一把的话，先启动的站点会独占全部名额，
+            // 等于 256 路并发同时打同一个域名——反而触发限流、制造假阴性
             val gate = Semaphore(TEST_CONCURRENCY)
-            serviceUrls.mapIndexed { svcIdx, serviceUrl ->
             val results = coroutineScope {
-                nodes.mapIndexed { i, n ->
+                testIdx.map { i ->
+                    val n = nodes[i
                     async {
                         gate.withPermit {
                             val delay = try {
                                 api.getProviderProxyDelay(
                                     provider = RuntimeOverrideBuilder.RADAR_PROVIDER_NAME,
                                     name = names[i] ?: n.name,
-                                    testUrl = serviceUrl,
-                                    timeout = TEST_TIMEOUT_MS,
+                                    testUrl = probe.url,
+                                    timeout = probe.timeoutMs,
                                 ).delay
                             } catch (e: CancellationException) {
                                 throw e
@@ -292,14 +320,16 @@ class RadarRepositoryImpl(
                 }.awaitAll()
             }
             diag("svc=$svcIdx tested=${results.size} passed=${results.count { it.delayMs > 0 }}")
-            onProgress(svcIdx + 1, serviceUrls.size)
+            onProgress(done.incrementAndGet(), services.size)
             results
+            }
+            }.awaitAll()
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             diag("testOnKernel threw: ${e.message}")
-            serviceUrls.map { emptyList() }
+            services.map { emptyList() }
         } finally {
             api.close()
         }
@@ -312,6 +342,31 @@ class RadarRepositoryImpl(
      * 用户挂着别的 VPN 时它根本起不来。测速也不需要 TUN —— mihomo 拨节点走自己的 outbound，
      * 跟有没有 TUN 无关，所以这里直接 fork 一个裸内核。
      */
+    /**
+     * TCP 预筛：在把节点写进 provider 之前，先对 server:port 做一次握手。
+     *
+     * 一轮上千个节点里九成以上是死的，每个死节点要付 8 次协议握手 + HTTP 超时；
+     * 而一次 TCP 握手只要 1 秒，且不必乘 8。
+     *
+     * **必须按协议分流**：hysteria2 / tuic / wireguard 走 QUIC（UDP），TCP 握手必然失败，
+     * 无条件放行——不分流会把这三种协议的可用节点整批误杀。
+     */
+    private suspend fun tcpReachable(nodes: List<RadarNode>): Set<Int> = coroutineScope {
+        val gate = Semaphore(PREFILTER_CONCURRENCY)
+        nodes.indices.map { i ->
+            async(Dispatchers.IO) {
+                val n = nodes[i]
+                if (n.protocol !in TCP_PROTOCOLS) return@async i
+                gate.withPermit {
+                    val ok = runCatching {
+                        Socket().use { it.connect(InetSocketAddress(n.server, n.port), PREFILTER_TIMEOUT_MS) }
+                    }.isSuccess
+                    if (ok) i else -1
+                }
+            }
+        }.awaitAll().filter { it >= 0 }.toSet()
+    }
+
     private suspend fun startKernel(): KernelHandle? {
         val workDir = ConfigGenerator.getWorkDir(context)
         workDir.mkdirs()
@@ -408,9 +463,15 @@ class RadarRepositoryImpl(
         private const val CONNECT_TIMEOUT_MS = 10_000L
         private const val REQUEST_TIMEOUT_MS = 30_000L
 
-        /** 拨测是真实协议握手，比抓取贵得多；32 路在真机上够快又不会把内核压垮 */
+        /** 拨测是真实协议握手，比抓取贵得多；8 个站点并行 × 32 路 = 256 路总并发 */
         private const val TEST_CONCURRENCY = 32
-        private const val TEST_TIMEOUT_MS = 3000
+
+        /** TCP 预筛并发：纯握手，比拨测便宜得多 */
+        private const val PREFILTER_CONCURRENCY = 64
+        /** TCP 预筛超时：活节点握手通常 <300ms，1 秒足够 */
+        private const val PREFILTER_TIMEOUT_MS = 1000
+        /** 走 TCP 的协议。QUIC 系（hysteria2 / tuic / wireguard）必须跳过，否则必被误杀 */
+        private val TCP_PROTOCOLS = setOf("vmess", "vless", "trojan", "ss", "ssr", "http", "socks5")
 
         /** 拨不通时的哨兵值，与 [RadarTestResult.delayMs] 的约定一致 */
         private const val NO_DELAY = -1

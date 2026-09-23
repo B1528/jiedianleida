@@ -650,6 +650,7 @@ private fun RadarTargetRow(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+            .background(container)
             .padding(horizontal = 18.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

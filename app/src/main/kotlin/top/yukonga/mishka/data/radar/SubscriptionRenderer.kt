@@ -302,9 +302,9 @@ internal object SubscriptionRenderer {
                 ro["public-key"] = t.pbk
                 if (t.sid.isNotEmpty()) ro["short-id"] = t.sid
                 p["reality-opts"] = ro
-                p["client-fingerprint"] = t.fp.ifEmpty { "chrome" }
+                p["client-fingerprint"] = safeFingerprint(t.fp)
             } else if (t.fp.isNotEmpty()) {
-                p["client-fingerprint"] = t.fp
+                p["client-fingerprint"] = safeFingerprint(t.fp)
             }
         }
 
@@ -385,10 +385,10 @@ internal object SubscriptionRenderer {
                     sb.append(",\"public_key\":\"").append(esc(t.pbk)).append("\"")
                     if (t.sid.isNotEmpty()) sb.append(",\"short_id\":\"").append(esc(t.sid)).append("\"")
                     sb.append("}")
-                    val fp = esc(t.fp.ifEmpty { "chrome" })
+                    val fp = esc(safeFingerprint(t.fp))
                     sb.append(",\"utls\":{\"enabled\":true,\"fingerprint\":\"").append(fp).append("\"}")
                 } else if (t.fp.isNotEmpty()) {
-                    sb.append(",\"utls\":{\"enabled\":true,\"fingerprint\":\"").append(esc(t.fp)).append("\"}")
+                    sb.append(",\"utls\":{\"enabled\":true,\"fingerprint\":\"").append(esc(safeFingerprint(t.fp))).append("\"}")
                 }
                 sb.append("}")
             }
@@ -397,6 +397,20 @@ internal object SubscriptionRenderer {
         sb.append("}")
         return sb.toString()
     }
+
+    /**
+     * mihomo 只认这几个 uTLS 指纹名，别的值会打 `wrong clientFingerprint:xxx` 然后
+     * **静默退化成不带指纹** —— REALITY 节点少了指纹基本握不上手。分享链里偶见
+     * `fp=unsafe` 这类野值，必须在这里归一化，不能原样透传。
+     */
+    private fun safeFingerprint(fp: String): String {
+        val v = fp.trim().lowercase()
+        return if (v in UTL_FINGERPRINTS) v else "chrome"
+    }
+
+    private val UTL_FINGERPRINTS = setOf(
+        "chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random",
+    )
 
     /** JSON 字符串转义。控制字符已由 [clean] 剥掉，这里只剩引号与反斜杠要处理 */
     private fun esc(s: String): String = buildString(s.length) {

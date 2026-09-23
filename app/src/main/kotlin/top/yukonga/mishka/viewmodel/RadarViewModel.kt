@@ -10,11 +10,13 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -24,6 +26,7 @@ import top.yukonga.mishka.domain.model.RadarExportTarget
 import top.yukonga.mishka.domain.model.RadarFetchResult
 import top.yukonga.mishka.domain.model.RadarNode
 import top.yukonga.mishka.domain.model.RadarSourceInput
+import top.yukonga.mishka.domain.repository.RadarProbe
 import top.yukonga.mishka.domain.repository.RadarRepository
 import top.yukonga.mishka.platform.PlatformStorage
 import top.yukonga.mishka.platform.StorageKeys
@@ -131,17 +134,22 @@ data class RadarSourcesUiState(
  * 探针优先挑各家的 204 / 小体积端点：`generate_204` 只回状态行不回 body，拨测耗时里
  * 几乎全是握手与 RTT，不会被下载时间污染。
  */
-private data class RadarService(val key: String, val name: String, val url: String)
+private data class RadarService(
+    val key: String,
+    val name: String,
+    val url: String,
+    val timeoutMs: Int = 3000,
+)
 
 private val RADAR_SERVICES = listOf(
-    RadarService("google", "Google", "http://www.google.com/generate_204"),
-    RadarService("youtube", "YouTube", "https://www.youtube.com/generate_204"),
-    RadarService("github", "GitHub", "https://github.com/robots.txt"),
-    RadarService("chatgpt", "ChatGPT", "https://chatgpt.com/robots.txt"),
-    RadarService("x", "X", "https://x.com/robots.txt"),
-    RadarService("cloudflare", "Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace"),
-    RadarService("grok", "Grok", "https://grok.com/robots.txt"),
-    RadarService("telegram", "Telegram", "https://telegram.org/"),
+    RadarService("google", "Google", "http://www.google.com/generate_204", 2000),
+    RadarService("youtube", "YouTube", "https://www.youtube.com/generate_204", 2500),
+    RadarService("github", "GitHub", "https://github.com/robots.txt", 2500),
+    RadarService("chatgpt", "ChatGPT", "https://chatgpt.com/robots.txt", 4000),
+    RadarService("x", "X", "https://x.com/robots.txt", 3000),
+    RadarService("cloudflare", "Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace", 2000),
+    RadarService("grok", "Grok", "https://grok.com/robots.txt", 4000),
+    RadarService("telegram", "Telegram", "https://telegram.org/", 3000),
 )
 
 /**
@@ -355,7 +363,9 @@ class RadarViewModel(
             update { it.copy(phase = RadarPhase.Scanning, stageDone = 1) }
 
             val result = try {
-                repository.parse(pending)
+                // parse 是纯 CPU 函数（正则 + 集合运算，上千节点几百 ms 起），
+                // 直接在 viewModelScope(Main) 里调会把界面冻住——必须切到 Default。
+                withContext(Dispatchers.Default) { repository.parse(pending) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -388,7 +398,7 @@ class RadarViewModel(
             var kernelAnswered = false
             // 内核只起一次，8 个目标共用它（见 RadarRepository.test），顺带把进度报给界面
             val allResults = try {
-                repository.test(result.nodes, RADAR_SERVICES.map { it.url }) { done, total ->
+                repository.test(result.nodes, RADAR_SERVICES.map { RadarProbe(it.url, it.timeoutMs) }) { done, total ->
                     update { it.copy(testDone = done, testTotal = total) }
                 }
             } catch (e: CancellationException) {

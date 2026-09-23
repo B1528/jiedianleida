@@ -51,8 +51,8 @@ class MihomoApiClient(
             config {
                 dispatcher(
                     Dispatcher().apply {
-                        maxRequests = 128
-                        maxRequestsPerHost = 64
+                        maxRequests = 512
+                        maxRequestsPerHost = 256
                     },
                 )
             }
