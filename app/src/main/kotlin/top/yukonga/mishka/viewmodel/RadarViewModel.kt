@@ -1,8 +1,6 @@
 package top.yukonga.mishka.viewmodel
 
 import android.content.Context
-import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +19,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import top.yukonga.mishka.data.radar.ShareServer
 import top.yukonga.mishka.R
 import top.yukonga.mishka.domain.model.RadarExportTarget
 import top.yukonga.mishka.domain.model.RadarFetchResult
@@ -88,11 +87,12 @@ data class RadarUiState(
     val pausedSources: Int = 0,
     /** 分享链解析失败条数。非 0 说明有链被静默丢掉，用户应当能看见 */
     val parseFailed: Int = 0,
-    /**
-     * 当前导出目录的显示名；null 表示还没选过。真正的 tree uri 留在 ViewModel 里不进状态 ——
-     * 屏幕只需要「显示什么」，不需要拿它去拼路径。
-     */
-    val exportDirLabel: String? = null,
+    /** 分享中：HTTP 服务是否在跑 */
+    val isSharing: Boolean = false,
+    /** 当前分享格式（v2rayN / Clash），决定 URL 与二维码 */
+    val shareFormat: String = "v2rayN",
+    /** 分享页显示的链接；null = 没在分享或拿不到局域网 IP */
+    val shareUrl: String? = null,
     /**
      * 拨测整个没跑起来（内核拉不起来 / provider 写不进去），所有目标都是 0 而不是真的都连不上。
      * 必须与「测了但全挂」区分开，否则用户会以为这批节点全废了。
@@ -188,8 +188,6 @@ class RadarViewModel(
     private var passSets: Map<String, Set<Int>> = emptyMap()
 
     /** 上次选定的导出目录（SAF tree uri）。null 表示还没选过，此时导出前要先弹目录选择器 */
-    private var exportDirUri: String? = null
-
     private fun update(transform: (RadarUiState) -> RadarUiState) {
         _uiState.value = transform(_uiState.value)
     }
@@ -210,11 +208,8 @@ class RadarViewModel(
         sourceSeq = loaded.mapNotNull { it.id.removePrefix("s").toIntOrNull() }.maxOrNull()?.plus(1) ?: 0
         _sourcesState.value = RadarSourcesUiState(draft = loaded, saved = loaded)
 
-        // 导出目录跨会话记住；存的是空串就当作没选过
-        exportDirUri = storage.getString(StorageKeys.RADAR_EXPORT_TREE, "").ifEmpty { null }
         _uiState.value = _uiState.value.copy(
             sources = loaded,
-            exportDirLabel = exportDirUri?.let(::dirLabel),
         )
     }
 
@@ -289,8 +284,6 @@ class RadarViewModel(
         if (!state.canPickTarget) state
         else state.copy(selectedTarget = if (state.selectedTarget == key) null else key)
     }
-
-    fun clearSelection() = update { it.copy(selectedTarget = null) }
 
     // === 扫描：第一段（抓取） ===
 
@@ -484,37 +477,45 @@ class RadarViewModel(
     fun takeSelectedTarget(): RadarTarget? = _uiState.value.targets
         .firstOrNull { it.key == _uiState.value.selectedTarget }
 
-// === 导出 ===
+// === 分享 ===
 
-    /** 选好目录后记住它：后续导出直接落这里，直到用户再改。 */
-    fun setExportDir(treeUri: String) {
-        exportDirUri = treeUri
-        storage.putString(StorageKeys.RADAR_EXPORT_TREE, treeUri)
-        update { it.copy(exportDirLabel = dirLabel(treeUri)) }
-    }
-
-    fun hasExportDir(): Boolean = exportDirUri != null
+    /** 分享服务。null = 没在分享 */
+    private var shareServer: ShareServer? = null
 
     /**
-     * 把选中目标里通过的节点渲染成 v2rayN 订阅，写进已选目录下的一个新文件。
+     * 启动分享：把选中目标里通过的节点渲染成 v2rayN / Clash 两种订阅，
+     * 起局域网 HTTP 服务，同一 WiFi 下的客户端扫码/复制链接后拉取。
      *
-     * 返回 false 的三种情况都不抛异常：没有选中目标、该目标一条都没通、写盘失败。
-     * 屏幕只需要知道成没成 —— 授权失效 / 磁盘满对用户没有可操作性。
-     *
-     * 只导出通过的节点是这个功能的意义所在：把 4000 条原始节点丢给用户等于没筛。
+     * 关闭分享（[stopShare]）= 服务停 = 链接失效。只在这几分钟里可更新。
      */
-    suspend fun exportSelected(): Boolean {
-        val target = takeSelectedTarget() ?: return false
-        val dir = exportDirUri ?: return false
-        val indexes = passSets[target.key] ?: return false
+    fun startShare() {
+        val target = takeSelectedTarget() ?: return
+        val indexes = passSets[target.key] ?: return
         val picked = scannedNodes.filterIndexed { i, _ -> i in indexes }
-        if (picked.isEmpty()) return false
-        val text = repository.render(picked, RadarExportTarget.V2rayN)
-        return repository.writeExport(dir, "radar-${target.key}.txt", text)
+        if (picked.isEmpty()) return
+        val v2 = repository.render(picked, RadarExportTarget.V2rayN)
+        val clash = repository.render(picked, RadarExportTarget.Clash)
+        val server = ShareServer(v2, clash)
+        server.start()
+        if (server.port == 0) return
+        shareServer = server
+        update {
+            it.copy(
+                isSharing = true,
+                shareFormat = "v2rayN",
+                shareUrl = server.url("v2rayN"),
+            )
+        }
     }
 
-    /** 从 tree uri 取出便于显示的目录名；解析不出来就原样显示 */
-    private fun dirLabel(uri: String): String = runCatching {
-        DocumentsContract.getTreeDocumentId(Uri.parse(uri)).substringAfterLast(':').ifEmpty { uri }
-    }.getOrDefault(uri)
+    fun stopShare() {
+        shareServer?.stop()
+        shareServer = null
+        update { it.copy(isSharing = false, shareUrl = null) }
+    }
+
+    fun setShareFormat(format: String) {
+        val server = shareServer ?: return
+        update { it.copy(shareFormat = format, shareUrl = server.url(format)) }
+    }
 }

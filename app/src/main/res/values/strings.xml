@@ -100,7 +100,7 @@
     <string name="radar_action_scan">Start scan</string>
     <string name="radar_action_scanning">Scanning…</string>
     <string name="radar_action_reset">Reset</string>
-    <string name="radar_action_export">Export %1$s</string>
+    <string name="radar_action_share">Share %1$s</string>
     <string name="radar_test_unavailable">The test kernel could not load any nodes, so connectivity was not tested</string>
 
     <string name="radar_sources_failed">%1$d sources failed to load</string>
@@ -109,9 +109,15 @@
     <string name="radar_test_progress">Testing target %1$d / %2$d</string>
     <string name="radar_action_continue">Continue</string>
     <string name="radar_target_all">Passing all</string>
-    <string name="radar_export_dir_none">Choose export folder</string>
-    <string name="radar_export_dir_set">Export to %1$s</string>
-    <string name="radar_export_change">Change</string>
+    <string name="radar_sharing_hint">Sharing — link expires when this page closes · same Wi-Fi only</string>
+    <string name="radar_share_title">Share subscription</string>
+    <string name="radar_share_qr_tip">Scan to add subscription\nSharing… · expires when closed · same Wi-Fi only</string>
+    <string name="radar_share_close">Close sharing</string>
+    <string name="radar_share_copy">Copy</string>
+    <string name="radar_share_copied">Copied</string>
+    <string name="radar_share_v2rayn">v2rayN</string>
+    <string name="radar_share_clash">Clash</string>
+    <string name="radar_share_no_url">Could not determine local IP — check Wi-Fi is on</string>
     <string name="radar_pause_title">Fetch complete</string>
     <string name="radar_pause_message">%1$d sources downloaded. Turn off any other VPN first, or the results will be skewed by its exit.</string>
     <string name="radar_pause_confirm">Other VPN is off</string>

@@ -1,8 +1,5 @@
 package top.yukonga.mishka.ui.screen.radar
 
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -98,40 +95,7 @@ fun RadarScreen(
         if (uiState.phase != RadarPhase.Paused) pauseAcknowledged = false
     }
 
-    // 导出目录：第一次点导出时弹 SAF 目录选择器，选完记住；之后直接落那里，随时可改。
-    // 用 rememberLauncherForActivityResult 就地注册，不走 FilePicker 那套从 Activity 逐层透传。
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var pendingExport by remember { mutableStateOf(false) }
-
-    val runExport: () -> Unit = {
-        scope.launch {
-            // 失败（授权失效 / 磁盘满）时保留选中，用户可以直接再点一次
-            if (viewModel.exportSelected()) viewModel.clearSelection()
-        }
-    }
-
-    val treeLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri == null) {
-            // 用户取消：只清掉待办，不动选中态
-            pendingExport = false
-        } else {
-            // 持久授权必须与选择器在同一个回调里拿，否则重启后这个 tree uri 就失效了
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            }
-            viewModel.setExportDir(uri.toString())
-            if (pendingExport) {
-                pendingExport = false
-                runExport()
-            }
-        }
-    }
+    // 导出已移除：改为局域网分享（见 RadarSharePage），分享页关掉 = 链接失效
 
     val backdrop = rememberBlurBackdrop()
     val blurActive = backdrop != null
@@ -141,22 +105,33 @@ fun RadarScreen(
         topBar = {
             BlurredBar(backdrop = backdrop, blurActive = blurActive) {
                 AdaptiveTopAppBar(
-                    title = "",
+                    title = if (uiState.isSharing) stringResource(R.string.radar_share_title) else "",
                     color = barColor,
                     scrollBehavior = scrollBehavior,
                     actions = {
-                        IconButton(onClick = onAddSource) {
-                            Icon(
-                                imageVector = MiuixIcons.Add,
-                                contentDescription = stringResource(R.string.radar_add_source),
-                                tint = MiuixTheme.colorScheme.onSurface,
-                            )
+                        if (!uiState.isSharing) {
+                            IconButton(onClick = onAddSource) {
+                                Icon(
+                                    imageVector = MiuixIcons.Add,
+                                    contentDescription = stringResource(R.string.radar_add_source),
+                                    tint = MiuixTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                     },
                 )
             }
         },
     ) { innerPadding ->
+        if (uiState.isSharing) {
+            RadarSharePage(
+                url = uiState.shareUrl,
+                format = uiState.shareFormat,
+                onFormatChange = viewModel::setShareFormat,
+                onClose = viewModel::stopShare,
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
                 WideContentBox { sidePadding ->
@@ -183,45 +158,17 @@ fun RadarScreen(
                     }
                 }
             }
-            // 导出目录行只在扫描完成后露出，未扫描时不占位置
-            if (uiState.phase == RadarPhase.Done) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = ItemGap)
-                        .padding(bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = uiState.exportDirLabel
-                            ?.let { stringResource(R.string.radar_export_dir_set, it) }
-                            ?: stringResource(R.string.radar_export_dir_none),
-                        fontSize = 12.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(
-                        text = stringResource(R.string.radar_export_change),
-                        onClick = { treeLauncher.launch(null) },
-                    )
-                }
-            }
             RadarActionButton(
                 uiState = uiState,
                 onScan = viewModel::startScan,
                 onContinue = viewModel::continueScan,
                 onReset = viewModel::reset,
-                onExport = {
-                    if (viewModel.hasExportDir()) {
-                        runExport()
-                    } else {
-                        // 还没选过目录：先弹选择器，选完在回调里接着导出
-                        pendingExport = true
-                        treeLauncher.launch(null)
-                    }
+                onShare = {
+                    viewModel.startShare()
                 },
             )
             Spacer(Modifier.height(bottomPadding))
+        }
         }
     }
 
@@ -693,7 +640,7 @@ private fun RadarActionButton(
     onScan: () -> Unit,
     onContinue: () -> Unit,
     onReset: () -> Unit,
-    onExport: () -> Unit,
+    onShare: () -> Unit,
 ) {
     val selected = uiState.targets.firstOrNull { it.key == uiState.selectedTarget }
     val scanning = uiState.phase == RadarPhase.Scanning
@@ -701,7 +648,7 @@ private fun RadarActionButton(
     val label = when {
         scanning -> stringResource(R.string.radar_action_scanning)
         paused -> stringResource(R.string.radar_action_continue)
-        selected != null -> stringResource(R.string.radar_action_export, selected.name)
+        selected != null -> stringResource(R.string.radar_action_share, selected.name)
         uiState.phase == RadarPhase.Done -> stringResource(R.string.radar_action_reset)
         else -> stringResource(R.string.radar_action_scan)
     }
@@ -711,7 +658,7 @@ private fun RadarActionButton(
             when {
                 scanning -> Unit
                 paused -> onContinue()
-                selected != null -> onExport()
+                selected != null -> onShare()
                 uiState.phase == RadarPhase.Done -> onReset()
                 else -> onScan()
             }

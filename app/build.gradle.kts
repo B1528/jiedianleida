@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.material.icons.extended)
     implementation(libs.hiddenapibypass)
     implementation(libs.quickie.bundled)
+    implementation(libs.zxing.core)
     implementation(libs.scripta.editor)
     ksp(libs.androidx.room3.compiler)
 }
