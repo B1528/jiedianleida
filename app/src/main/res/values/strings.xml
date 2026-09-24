@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Mishka</string>
+    <string name="app_name" translatable="false">节点雷达</string>
 
     <!-- Notification Channels -->
     <string name="channel_vpn_name">VPN Service Status</string>

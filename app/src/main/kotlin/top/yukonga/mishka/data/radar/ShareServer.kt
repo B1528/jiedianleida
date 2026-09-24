@@ -31,15 +31,20 @@ class ShareServer(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        try {
-            val ss = ServerSocket(0)
-            ss.reuseAddress = true
-            serverSocket = ss
-            port = ss.localPort
-            acceptThread = thread(name = "radar-share", isDaemon = true) { acceptLoop(ss) }
-        } catch (e: IOException) {
-            running.set(false)
+        // 固定五位数端口：换设备只需加一次订阅，以后直接更新就能拿到最新节点。
+        // 占用时顺延下一个，绝大多数情况落在 38231。
+        for (candidate in PORTS) {
+            try {
+                val ss = ServerSocket(candidate)
+                ss.reuseAddress = true
+                serverSocket = ss
+                port = ss.localPort
+                acceptThread = thread(name = "radar-share", isDaemon = true) { acceptLoop(ss) }
+                return
+            } catch (_: IOException) {
+            }
         }
+        running.set(false)
     }
 
     private fun acceptLoop(ss: ServerSocket) {
@@ -111,5 +116,10 @@ class ShareServer(
             "Clash" -> "http://$ip:$port/clash.yaml"
             else -> null
         }
+    }
+
+    companion object {
+        /** 固定端口候选：五位数，避开 8080 / 9099 / 7890 等常见端口；占用时顺延 */
+        private val PORTS = intArrayOf(38231, 38232, 38233)
     }
 }
