@@ -84,16 +84,17 @@ fun RadarSharePage(
                 .background(MiuixTheme.colorScheme.surfaceContainer)
                 .padding(4.dp),
         ) {
-            FormatTab("v2rayN", format, onFormatChange)
-            FormatTab("Clash", format, onFormatChange)
+            FormatTab("v2rayN", format, onFormatChange, Modifier.weight(1f))
+            FormatTab("Clash", format, onFormatChange, Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(28.dp))
 
         // 二维码
-        if (qrBitmap != null) {
+        val qr = qrBitmap
+        if (qr != null) {
             Image(
-                bitmap = qrBitmap.asImageBitmap(),
+                bitmap = qr.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier
                     .width(240.dp)
@@ -170,11 +171,15 @@ fun RadarSharePage(
 }
 
 @Composable
-private fun FormatTab(label: String, current: String, onChange: (String) -> Unit) {
+private fun FormatTab(
+    label: String,
+    current: String,
+    onChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val selected = label == current
     Box(
-        modifier = Modifier
-            .weight(1f)
+        modifier = modifier
             .clip(RoundedCornerShape(9.dp))
             .background(
                 if (selected) MiuixTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
