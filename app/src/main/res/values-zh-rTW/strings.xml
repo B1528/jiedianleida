@@ -98,7 +98,6 @@
     <string name="radar_action_scan">開始掃描</string>
     <string name="radar_action_scanning">掃描中…</string>
     <string name="radar_action_reset">重設</string>
-    <string name="radar_action_export">匯出 %1$s</string>
     <string name="radar_test_unavailable">測速核心沒能載入節點，跳過連線測試</string>
     <string name="radar_sources_failed">有 %1$d 個來源抓取失敗</string>
     <string name="radar_parse_failed">有 %1$d 條連結無法解析</string>
@@ -106,9 +105,6 @@
     <string name="radar_test_progress">正在測試目標 %1$d / %2$d</string>
     <string name="radar_action_continue">繼續執行</string>
     <string name="radar_target_all">全部通過</string>
-    <string name="radar_export_dir_none">選擇匯出目錄</string>
-    <string name="radar_export_dir_set">匯出到 %1$s</string>
-    <string name="radar_export_change">變更</string>
     <string name="radar_pause_title">抓取完成</string>
     <string name="radar_pause_message">已下載 %1$d 個來源。請先關閉其他 VPN 再繼續，否則測出來的結果會受它的出口影響。</string>
     <string name="radar_pause_confirm">已關閉</string>
